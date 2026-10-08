@@ -367,28 +367,31 @@ sap.ui.getCore().attachInit(function () {
                 new sap.m.Button({
                   icon: "sap-icon://validate",
                   tooltip: "Validate Data (Step 02)",
-                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var id = e.getSource().data("id");
-                    if (id) runAction("validateData", id, "Validate Data");
+                    var ctx = e.getSource().getBindingContext();
+                    var id = ctx ? ctx.getProperty("ID") : null;
+                    if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    runAction("validateData", id, "Validate Data");
                   }
                 }),
                 new sap.m.Button({
                   icon: "sap-icon://simulate",
                   tooltip: "Calculate Balance (Step 03)",
-                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var id = e.getSource().data("id");
-                    if (id) runAction("calculateBalance", id, "Calculate Balance");
+                    var ctx = e.getSource().getBindingContext();
+                    var id = ctx ? ctx.getProperty("ID") : null;
+                    if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    runAction("calculateBalance", id, "Calculate Balance");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin"),
                 new sap.m.Button({
                   icon: "sap-icon://detail-view",
                   tooltip: "Generate Exception Report (Step 07)",
-                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var id = e.getSource().data("id");
-                    if (id) runAction("generateExceptionReport", id, "Exception Report");
+                    var ctx = e.getSource().getBindingContext();
+                    var id = ctx ? ctx.getProperty("ID") : null;
+                    if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    runAction("generateExceptionReport", id, "Exception Report");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin")
               ]
@@ -702,12 +705,12 @@ sap.ui.getCore().attachInit(function () {
     ];
 
     var ROOT_CAUSES = [
-      { code:"MC", label:"Measurement / Calibration",  color: sap.ui.core.IconColor.Neutral  },
-      { code:"TX", label:"Transaction Error",           color: sap.ui.core.IconColor.Critical },
-      { code:"MD", label:"Master Data Issue",           color: sap.ui.core.IconColor.Critical },
-      { code:"TF", label:"Transfer / Routing",          color: sap.ui.core.IconColor.Default  },
-      { code:"PL", label:"Physical Loss / Gain",        color: sap.ui.core.IconColor.Negative },
-      { code:"SY", label:"System / Interface",          color: sap.ui.core.IconColor.Neutral  }
+      { code:"MC", label:"Measurement / Calibration",  color: "#47637d" },
+      { code:"TX", label:"Transaction Error",           color: "#bb0000" },
+      { code:"MD", label:"Master Data Issue",           color: "#bb0000" },
+      { code:"TF", label:"Transfer / Routing",          color: "#e9730c" },
+      { code:"PL", label:"Physical Loss / Gain",        color: "#6a6d70" },
+      { code:"SY", label:"System / Interface",          color: "#0070f2" }
     ];
 
     // Run selector
@@ -778,14 +781,22 @@ sap.ui.getCore().attachInit(function () {
       );
     });
 
-    // Root cause reference
+    // Root cause reference — clickable chips that show the full description
     var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
     ROOT_CAUSES.forEach(function(rc) {
       oRcBox.addItem(
         new sap.m.Button({
           text: rc.code + " — " + rc.label,
           type: sap.m.ButtonType.Ghost,
-          enabled: false
+          press: function() {
+            sap.m.MessageBox.information(
+              rc.code + ": " + rc.label + "\n\n" +
+              "This root cause category is assigned during Step 08 (Investigate & Classify).\n" +
+              "The AI ExceptionManagementAgent analyzes transaction data, meter readings, and\n" +
+              "master data to classify each variance exception.",
+              { title: "Root Cause: " + rc.code }
+            );
+          }
         }).addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom")
       );
     });
