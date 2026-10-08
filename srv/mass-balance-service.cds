@@ -36,74 +36,7 @@ service MassBalanceService @(path: '/api/mass-balance') {
     // ── Mass Balance Runs ───────────────────────────────────────────────
 
     @cds.redirection.target: true
-    entity MassBalanceRuns as projection on db.MassBalanceRun
-        actions {
-            /**
-             * Step 01: Trigger a new mass balance run.
-             * Autonomously queries tank gauges, flow meters, LIMS, and SAP IS-Oil
-             * data without human orchestration (slide 8 — Criterion 1: Autonomy).
-             */
-            action triggerRun(
-                periodType : String enum { DAILY; MONTHLY; },
-                period     : String,    // YYYY-MM-DD or YYYY-MM
-                plantId    : UUID,
-                triggerType: String enum { SCHEDULED; ON_DEMAND; MANUAL; }
-            ) returns MassBalanceRun;
-
-            /**
-             * Step 02: Validate data completeness, consistency & referential
-             * integrity (slide 18). Agent does NOT proceed to calculation with
-             * incomplete or inconsistent data.
-             */
-            action validateData(runId: UUID) returns ValidationResult;
-
-            /**
-             * Step 03: Calculate mass balance per period.
-             * Formula: Closing = Opening + Receipts − Issues − Consumption
-             *          ± Transfers ± Adjustments (slide 19)
-             */
-            action calculateBalance(runId: UUID) returns CalculationResult;
-
-            /**
-             * Step 04 & 05: Reconcile at plant / tank / material level and
-             * compare physical stock (dip reading) vs SAP book quantity (slide 20).
-             */
-            action reconcileAndCompare(runId: UUID) returns ReconciliationResult;
-
-            /**
-             * Step 06: Check variance against configured tolerance thresholds.
-             * Assigns severity: INFO / ADVISORY / WARNING / CRITICAL (slide 21).
-             */
-            action checkTolerances(runId: UUID) returns ToleranceCheckResult;
-
-            /**
-             * Steps 07–08: Investigate flagged variances and classify root causes
-             * (MC / TX / MD / TF / PL / SY) (slide 22).
-             */
-            action investigateAndClassify(runId: UUID) returns InvestigationResult;
-
-            /**
-             * Step 09: Generate exception report with evidence package
-             * and corrective recommendations (slide 23).
-             */
-            action generateExceptionReport(runId: UUID) returns ExceptionReportResult;
-
-            /**
-             * Step 10: Generate executive summary — management KPI dashboard
-             * and period summary (slide 24).
-             */
-            action generateExecutiveSummary(runId: UUID) returns ExecutiveSummaryResult;
-
-            /**
-             * Run the full 10-step agentic pipeline end-to-end.
-             * Pauses at human approval gates automatically.
-             */
-            action runFullPipeline(
-                periodType : String enum { DAILY; MONTHLY; },
-                period     : String,
-                plantId    : UUID
-            ) returns PipelineResult;
-        };
+    entity MassBalanceRuns as projection on db.MassBalanceRun;
 
     // ── Balance Lines ───────────────────────────────────────────────────
 
@@ -129,58 +62,13 @@ service MassBalanceService @(path: '/api/mass-balance') {
     // ── Exceptions (Steps 8 & 9 — Evidence-based findings) ─────────────
 
     @cds.redirection.target: true
-    entity Exceptions as projection on db.Exception
-        actions {
-            /** Agent assigns root cause category and narrative (slide 22) */
-            action classifyRootCause(
-                exceptionId      : UUID,
-                rootCauseCategory: String enum { MC; TX; MD; TF; PL; SY; },
-                narrative        : String
-            ) returns ExceptionResult;
-
-            /** Agent submits exception for human review — approval-gated (slide 23) */
-            action submitForApproval(
-                exceptionId   : UUID,
-                proposedAction: String,
-                priority      : String enum { LOW; MEDIUM; HIGH; URGENT; }
-            ) returns ApprovalRequestResult;
-
-            /** Human closes an exception after review */
-            action closeException(
-                exceptionId : UUID,
-                comments    : String
-            ) returns ExceptionResult;
-        };
+    entity Exceptions as projection on db.Exception;
 
     // ── Approval Requests (Human-in-the-Loop — slides 6 & 23) ──────────
-    //
-    // PRINCIPLE: No automatic corrections. Every stock adjustment,
-    // transaction correction, or posting requires explicit user approval.
 
-    entity ApprovalRequests as projection on db.ApprovalRequest
-        actions {
-            /**
-             * Human approves a proposed correction.
-             * After approval, SAP document creation is triggered.
-             */
-            action approve(
-                approvalId: UUID,
-                comments  : String
-            ) returns ApprovalRequestResult;
-
-            /**
-             * Human rejects a proposed correction with reason.
-             */
-            action reject(
-                approvalId: UUID,
-                comments  : String
-            ) returns ApprovalRequestResult;
-        };
+    entity ApprovalRequests as projection on db.ApprovalRequest;
 
     // ── Audit Log (Full Audit Trail — slide 6) ──────────────────────────
-    //
-    // Every agent action is logged with timestamps, data sources,
-    // and decision rationale for traceability.
 
     @readonly
     entity AuditLogs as projection on db.AuditLog;
@@ -212,6 +100,45 @@ service MassBalanceService @(path: '/api/mass-balance') {
         correctionsPosted, pendingApprovals,
         plant.plantCode, plant.plantName
     };
+
+    // ── Pipeline actions (unbound — called at service level) ────────────
+
+    action triggerRun(
+        periodType : String enum { DAILY; MONTHLY; },
+        period     : String,
+        plantId    : UUID,
+        triggerType: String enum { SCHEDULED; ON_DEMAND; MANUAL; }
+    ) returns MassBalanceRun;
+
+    action validateData            (runId: UUID) returns ValidationResult;
+    action calculateBalance        (runId: UUID) returns CalculationResult;
+    action reconcileAndCompare     (runId: UUID) returns ReconciliationResult;
+    action checkTolerances         (runId: UUID) returns ToleranceCheckResult;
+    action investigateAndClassify  (runId: UUID) returns InvestigationResult;
+    action generateExceptionReport (runId: UUID) returns ExceptionReportResult;
+    action generateExecutiveSummary(runId: UUID) returns ExecutiveSummaryResult;
+
+    action runFullPipeline(
+        periodType : String enum { DAILY; MONTHLY; },
+        period     : String,
+        plantId    : UUID
+    ) returns PipelineResult;
+
+    action classifyRootCause(
+        exceptionId      : UUID,
+        rootCauseCategory: String enum { MC; TX; MD; TF; PL; SY; },
+        narrative        : String
+    ) returns ExceptionResult;
+
+    action submitForApproval(
+        exceptionId   : UUID,
+        proposedAction: String,
+        priority      : String enum { LOW; MEDIUM; HIGH; URGENT; }
+    ) returns ApprovalRequestResult;
+
+    action closeException (exceptionId: UUID, comments: String) returns ExceptionResult;
+    action approve        (approvalId:  UUID, comments: String) returns ApprovalRequestResult;
+    action rejectApproval (approvalId:  UUID, comments: String) returns ApprovalRequestResult;
 }
 
 // ─────────────────────────────────────────────────────────────────────

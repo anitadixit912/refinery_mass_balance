@@ -46,7 +46,10 @@ sap.ui.getCore().attachInit(function () {
   function odata(path) {
     return fetch(path, { headers: { Accept: "application/json" } })
       .then(function(r){ return r.json(); })
-      .then(function(d){ return d.value !== undefined ? d.value : d; });
+      .then(function(d){
+        if (d.error) throw new Error(d.error.message);
+        return Array.isArray(d.value) ? d.value : Array.isArray(d) ? d : [];
+      });
   }
 
   function odataPost(path, body) {
@@ -61,7 +64,7 @@ sap.ui.getCore().attachInit(function () {
     oModel.setProperty("/busy", true);
     Promise.all([
       odata(BASE + "/MassBalanceRuns?$orderby=createdAt desc&$top=50"),
-      odata(BASE + "/Exceptions?$orderby=detectedAt desc&$top=100"),
+      odata(BASE + "/Exceptions?$orderby=createdAt desc&$top=100"),
       odata(BASE + "/ApprovalRequests?$orderby=requestedAt desc&$top=100"),
       odata(ADMIN + "/Plants"),
       odata(ADMIN + "/Materials"),
@@ -196,11 +199,15 @@ sap.ui.getCore().attachInit(function () {
       onClose: function(action) {
         if (action !== sap.m.MessageBox.Action.OK) return;
         oModel.setProperty("/busy", true);
-        odataPost(BASE + "/MassBalanceRuns/" + runId + "/" + path, {})
+        odataPost(BASE + "/" + path, { runId: runId })
           .then(function(r){
             oModel.setProperty("/busy", false);
-            sap.m.MessageToast.show(label + " completed.");
-            loadAll();
+            if (r && r.error) {
+              sap.m.MessageBox.error(label + " error: " + r.error.message);
+            } else {
+              sap.m.MessageToast.show(label + " completed.");
+              loadAll();
+            }
           }).catch(function(e){
             oModel.setProperty("/busy", false);
             sap.m.MessageBox.error(label + " failed: " + e.message);
@@ -543,7 +550,7 @@ sap.ui.getCore().attachInit(function () {
                     sap.m.MessageBox.confirm("Approve this request?", {
                       onClose: function(a) {
                         if (a !== sap.m.MessageBox.Action.OK) return;
-                        odataPost(BASE + "/ApprovalRequests/" + id + "/approve", { comments: "Approved via UI" })
+                        odataPost(BASE + "/approve", { approvalId: id, comments: "Approved via UI" })
                           .then(function(){ sap.m.MessageToast.show("Approved."); loadAll(); })
                           .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
                       }
@@ -559,7 +566,7 @@ sap.ui.getCore().attachInit(function () {
                     sap.m.MessageBox.confirm("Reject this request?", {
                       onClose: function(a) {
                         if (a !== sap.m.MessageBox.Action.OK) return;
-                        odataPost(BASE + "/ApprovalRequests/" + id + "/reject", { comments: "Rejected via UI" })
+                        odataPost(BASE + "/rejectApproval", { approvalId: id, comments: "Rejected via UI" })
                           .then(function(){ sap.m.MessageToast.show("Rejected."); loadAll(); })
                           .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
                       }

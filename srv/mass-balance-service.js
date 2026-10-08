@@ -25,14 +25,14 @@ const Orchestrator = require('./agents/orchestrator');
 module.exports = cds.service.impl(async function (srv) {
 
     const {
-        MassBalanceRun,
-        MassBalanceLine,
-        ValidationIssue,
-        Exception,
-        ApprovalRequest,
-        AuditLog,
-        BookStockSnapshot,
-        ToleranceConfig,
+        MassBalanceRuns:    MassBalanceRun,
+        MassBalanceLines:   MassBalanceLine,
+        ValidationIssues:   ValidationIssue,
+        Exceptions:         Exception,
+        ApprovalRequests:   ApprovalRequest,
+        AuditLogs:          AuditLog,
+        BookStockSnapshots: BookStockSnapshot,
+        ToleranceConfigs:   ToleranceConfig,
     } = srv.entities;
 
     const orchestrator = new Orchestrator(cds.db);
@@ -292,7 +292,7 @@ module.exports = cds.service.impl(async function (srv) {
     // ─────────────────────────────────────────────────────────────────
     //  ACTION: classifyRootCause  (on Exception)
     // ─────────────────────────────────────────────────────────────────
-    srv.on('classifyRootCause', 'Exceptions', async (req) => {
+    srv.on('classifyRootCause', async (req) => {
         const { exceptionId, rootCauseCategory, narrative } = req.data;
 
         const exc = await SELECT.one.from('refinery.massbalance.Exception')
@@ -314,7 +314,7 @@ module.exports = cds.service.impl(async function (srv) {
     //  Evidence-based — all variances backed by transaction-level
     //  evidence before any exception is raised or escalated (slide 6)
     // ─────────────────────────────────────────────────────────────────
-    srv.on('submitForApproval', 'Exceptions', async (req) => {
+    srv.on('submitForApproval', async (req) => {
         const { exceptionId, proposedAction, priority } = req.data;
 
         const exc = await SELECT.one.from('refinery.massbalance.Exception')
@@ -345,7 +345,7 @@ module.exports = cds.service.impl(async function (srv) {
     // ─────────────────────────────────────────────────────────────────
     //  ACTION: closeException
     // ─────────────────────────────────────────────────────────────────
-    srv.on('closeException', 'Exceptions', async (req) => {
+    srv.on('closeException', async (req) => {
         const { exceptionId, comments } = req.data;
 
         await UPDATE('refinery.massbalance.Exception').where({ ID: exceptionId }).set({
@@ -363,7 +363,7 @@ module.exports = cds.service.impl(async function (srv) {
     //  Approval-gated: each correction must be explicitly approved
     //  before any SAP document is created or modified (slide 23)
     // ─────────────────────────────────────────────────────────────────
-    srv.on('approve', 'ApprovalRequests', async (req) => {
+    srv.on('approve', async (req) => {
         const { approvalId, comments } = req.data;
 
         const approval = await SELECT.one.from(ApprovalRequest).where({ ID: approvalId });
@@ -402,7 +402,7 @@ module.exports = cds.service.impl(async function (srv) {
     // ─────────────────────────────────────────────────────────────────
     //  ACTION: reject  (on ApprovalRequest)
     // ─────────────────────────────────────────────────────────────────
-    srv.on('reject', 'ApprovalRequests', async (req) => {
+    srv.on('rejectApproval', async (req) => {
         const { approvalId, comments } = req.data;
 
         const approval = await SELECT.one.from(ApprovalRequest).where({ ID: approvalId });
