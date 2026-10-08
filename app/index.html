@@ -92,6 +92,20 @@ sap.ui.getCore().attachInit(function () {
       oModel.setProperty("/kpi/criticalExceptions", excs.filter(function(e){ return e.severity === "CRITICAL"; }).length);
       oModel.setProperty("/kpi/pendingApprovals",   apprs.filter(function(a){ return a.approvalStatus === "PENDING"; }).length);
       oModel.setProperty("/kpi/balanceStatus",      lastRun ? lastRun.balanceStatus || "—" : "—");
+
+      // Imperatively populate the Pipeline run selector so keys are guaranteed correct
+      if (oPipelineRunSel) {
+        var prevKey = oPipelineRunSel.getSelectedKey();
+        oPipelineRunSel.destroyItems();
+        runs.forEach(function(r) {
+          oPipelineRunSel.addItem(new sap.ui.core.ListItem({
+            key:  r.ID,
+            text: (r.runId || r.ID.slice(0,8)) + " | " + (r.period || "?") + " | " + (r.runStatus || "?")
+          }));
+        });
+        if (prevKey) oPipelineRunSel.setSelectedKey(prevKey);
+      }
+
       oModel.setProperty("/busy", false);
     }).catch(function(e){
       oModel.setProperty("/busy", false);
@@ -111,6 +125,7 @@ sap.ui.getCore().attachInit(function () {
 
   // ─── TRIGGER DIALOG ──────────────────────────────────────────────────────
   var oPlantSel = new sap.m.Select({ width: "100%", forceSelection: false });
+  var oPipelineRunSel = null; // set by buildAboutPage(), updated by loadAll()
 
   var oPeriodType = new sap.m.Select({
     width: "100%",
@@ -713,20 +728,16 @@ sap.ui.getCore().attachInit(function () {
       { code:"SY", label:"System / Interface",          color: "#0070f2" }
     ];
 
-    // Run selector
+    // Run selector — populated imperatively by loadAll() so keys are guaranteed correct
     var oRunSel = new sap.m.Select({
-      width: "320px",
+      width: "340px",
       forceSelection: false,
-      change: function() {},
-      items: {
-        path: "/runs",
-        template: new sap.ui.core.ListItem({
-          key: "{ID}",
-          text: { parts: ["runId","period","runStatus"], formatter: function(r,p,s){ return (r||"?") + " | " + (p||"?") + " | " + (s||"?"); } }
-        })
+      change: function(e) {
+        var item = e.getSource().getSelectedItem();
+        if (item) sap.m.MessageToast.show("Active run: " + item.getText());
       }
     });
-    oRunSel.setModel(oModel);
+    oPipelineRunSel = oRunSel; // register so loadAll() can populate it
 
     // Step cards
     var oStepBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
