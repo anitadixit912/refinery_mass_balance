@@ -260,18 +260,35 @@ sap.ui.getCore().attachInit(function () {
     return lines.join("\n");
   }
 
-  function showResultDialog(title, text) {
+  function showResultDialog(title, text, navLabel, navFn) {
     var oDialog = new sap.m.Dialog({
       title: title,
       contentWidth: "500px",
-      content: [ new sap.m.Text({ text: text, wrapping: true }).addStyleClass("sapUiSmallMargin") ],
-      endButton: new sap.m.Button({
-        text: "Close",
-        press: function() { oDialog.close(); oDialog.destroy(); }
-      })
+      content: [ new sap.m.Text({ text: text, wrapping: true }).addStyleClass("sapUiSmallMargin") ]
     });
+    if (navLabel && navFn) {
+      oDialog.setBeginButton(new sap.m.Button({
+        text: navLabel,
+        type: sap.m.ButtonType.Emphasized,
+        press: function() { oDialog.close(); oDialog.destroy(); navFn(); }
+      }));
+    }
+    oDialog.setEndButton(new sap.m.Button({
+      text: "Close",
+      press: function() { oDialog.close(); oDialog.destroy(); }
+    }));
     oDialog.open();
   }
+
+  var _stepNavMap = {
+    "validateData":             { label: "View Run Status →",     key: "runs"       },
+    "calculateBalance":         { label: "View Run Status →",     key: "runs"       },
+    "reconcileAndCompare":      { label: "View Exceptions →",     key: "exceptions" },
+    "checkTolerances":          { label: "View Exceptions →",     key: "exceptions" },
+    "investigateAndClassify":   { label: "View Exceptions →",     key: "exceptions" },
+    "generateExceptionReport":  { label: "View Report / Exceptions →", key: "exceptions" },
+    "generateExecutiveSummary": { label: "View Dashboard →",      key: "dashboard"  }
+  };
 
   function runAction(path, runId, label) {
     if (!window.confirm("Run \"" + label + "\" for run:\n" + runId + "\n\nAI agents will execute this step.")) return;
@@ -282,7 +299,13 @@ sap.ui.getCore().attachInit(function () {
         if (r && r.error) {
           sap.m.MessageToast.show(label + " failed: " + r.error.message);
         } else {
-          showResultDialog("Step Complete — " + label, formatAgentResult(label, r));
+          var nav = _stepNavMap[path];
+          showResultDialog(
+            "Step Complete — " + label,
+            formatAgentResult(label, r),
+            nav ? nav.label : null,
+            nav ? function() { oIconTabBar.setSelectedKey(nav.key); loadAll(); } : null
+          );
           loadAll();
         }
       }).catch(function(e){
