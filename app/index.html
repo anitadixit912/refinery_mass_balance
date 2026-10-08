@@ -176,19 +176,19 @@ sap.ui.getCore().attachInit(function () {
           oTriggerDialog.setBusy(false);
           oTriggerDialog.close();
           if (result && result.error) {
-            sap.m.MessageBox.error("Trigger failed: " + result.error.message);
+            sap.m.MessageToast.show("Trigger failed: " + result.error.message);
             return;
           }
-          sap.m.MessageBox.information(
+          showResultDialog(
+            "Run Triggered — AI Agent Ready",
             "Run created successfully!\n\nRun ID: " + (result.runId || result.ID || "?") +
             "\nStatus: " + (result.status || result.runStatus || "INITIATED") +
-            "\n\nNow go to the Pipeline tab to execute the 10 agentic steps.",
-            { title: "Run Triggered — AI Agent Ready" }
+            "\n\nGo to the Pipeline tab to execute the 10 agentic steps."
           );
           loadAll();
         }).catch(function(e){
           oTriggerDialog.setBusy(false);
-          sap.m.MessageBox.error("Failed to trigger run: " + e.message);
+          sap.m.MessageToast.show("Failed to trigger run: " + e.message);
         });
       }
     }),
@@ -260,30 +260,35 @@ sap.ui.getCore().attachInit(function () {
     return lines.join("\n");
   }
 
-  function runAction(path, runId, label) {
-    sap.m.MessageBox.confirm("Run " + label + " for run ID:\n" + runId + "\n\nAI agents will execute this step.", {
-      title: "Confirm Pipeline Step",
-      onClose: function(action) {
-        if (action !== sap.m.MessageBox.Action.OK) return;
-        oModel.setProperty("/busy", true);
-        odataPost(BASE + "/" + path, { runId: runId })
-          .then(function(r){
-            oModel.setProperty("/busy", false);
-            if (r && r.error) {
-              sap.m.MessageBox.error(label + " error: " + r.error.message);
-            } else {
-              sap.m.MessageBox.information(formatAgentResult(label, r), {
-                title: "Step Complete — " + label,
-                actions: [sap.m.MessageBox.Action.CLOSE]
-              });
-              loadAll();
-            }
-          }).catch(function(e){
-            oModel.setProperty("/busy", false);
-            sap.m.MessageBox.error(label + " failed: " + e.message);
-          });
-      }
+  function showResultDialog(title, text) {
+    var oDialog = new sap.m.Dialog({
+      title: title,
+      contentWidth: "500px",
+      content: [ new sap.m.Text({ text: text, wrapping: true }).addStyleClass("sapUiSmallMargin") ],
+      endButton: new sap.m.Button({
+        text: "Close",
+        press: function() { oDialog.close(); oDialog.destroy(); }
+      })
     });
+    oDialog.open();
+  }
+
+  function runAction(path, runId, label) {
+    if (!window.confirm("Run \"" + label + "\" for run:\n" + runId + "\n\nAI agents will execute this step.")) return;
+    oModel.setProperty("/busy", true);
+    odataPost(BASE + "/" + path, { runId: runId })
+      .then(function(r){
+        oModel.setProperty("/busy", false);
+        if (r && r.error) {
+          sap.m.MessageToast.show(label + " failed: " + r.error.message);
+        } else {
+          showResultDialog("Step Complete — " + label, formatAgentResult(label, r));
+          loadAll();
+        }
+      }).catch(function(e){
+        oModel.setProperty("/busy", false);
+        sap.m.MessageToast.show(label + " failed: " + e.message);
+      });
   }
 
   // ─── KPI TILES ───────────────────────────────────────────────────────────
@@ -574,20 +579,13 @@ sap.ui.getCore().attachInit(function () {
                   press: function(e) {
                     var id = e.getSource().data("id");
                     if (!id) { sap.m.MessageToast.show("Could not get approval ID"); return; }
-                    sap.m.MessageBox.confirm("Approve this request?", {
-                      onClose: function(a) {
-                        if (a !== sap.m.MessageBox.Action.OK) return;
-                        odataPost(BASE + "/approve", { approvalId: id, comments: "Approved via UI" })
-                          .then(function(r){
-                            if (r && r.error) { sap.m.MessageBox.error("Error: " + r.error.message); return; }
-                            sap.m.MessageBox.information(
-                              "Approved!\n\nSAP Document: " + (r.sapDocNumber || "—") + "\n" + (r.message || ""),
-                              { title: "Approval Confirmed" }
-                            );
-                            loadAll();
-                          }).catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
-                      }
-                    });
+                    if (!window.confirm("Approve this request?")) return;
+                    odataPost(BASE + "/approve", { approvalId: id, comments: "Approved via UI" })
+                      .then(function(r){
+                        if (r && r.error) { sap.m.MessageToast.show("Error: " + r.error.message); return; }
+                        sap.m.MessageToast.show("Approved! SAP Doc: " + (r.sapDocNumber || "—") + " — " + (r.message || ""));
+                        loadAll();
+                      }).catch(function(e){ sap.m.MessageToast.show("Error: " + e.message); });
                   }
                 }),
                 new sap.m.Button({
@@ -598,17 +596,13 @@ sap.ui.getCore().attachInit(function () {
                   press: function(e) {
                     var id = e.getSource().data("id");
                     if (!id) { sap.m.MessageToast.show("Could not get approval ID"); return; }
-                    sap.m.MessageBox.confirm("Reject this request?", {
-                      onClose: function(a) {
-                        if (a !== sap.m.MessageBox.Action.OK) return;
-                        odataPost(BASE + "/rejectApproval", { approvalId: id, comments: "Rejected via UI" })
-                          .then(function(r){
-                            if (r && r.error) { sap.m.MessageBox.error("Error: " + r.error.message); return; }
-                            sap.m.MessageToast.show("Rejected. Exception returned to OPEN status.");
-                            loadAll();
-                          }).catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
-                      }
-                    });
+                    if (!window.confirm("Reject this request?")) return;
+                    odataPost(BASE + "/rejectApproval", { approvalId: id, comments: "Rejected via UI" })
+                      .then(function(r){
+                        if (r && r.error) { sap.m.MessageToast.show("Error: " + r.error.message); return; }
+                        sap.m.MessageToast.show("Rejected. Exception returned to OPEN status.");
+                        loadAll();
+                      }).catch(function(e){ sap.m.MessageToast.show("Error: " + e.message); });
                   }
                 }).addStyleClass("sapUiTinyMarginBegin")
               ]
@@ -722,7 +716,7 @@ sap.ui.getCore().attachInit(function () {
     function pipelineAction(action, title) {
       var runId = getSelectedRunId();
       if (!runId) {
-        sap.m.MessageBox.warning("Please select a run from the 'Active Run' dropdown first.", { title: "No Run Selected" });
+        sap.m.MessageToast.show("Select a run from the 'Active Run' dropdown first.");
         return;
       }
       if (action === "triggerRun" || action === "runFullPipeline") {
@@ -755,12 +749,8 @@ sap.ui.getCore().attachInit(function () {
               type: emphasized ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
               press: (function(a, t) {
                 return function() {
-                  try {
-                    window.alert("PRESSED: " + a);
-                    pipelineAction(a, t);
-                  } catch(err) {
-                    window.alert("ERROR in " + a + ": " + err.message);
-                  }
+                  try { pipelineAction(a, t); }
+                  catch(err) { sap.m.MessageToast.show("Error: " + err.message); }
                 };
               }(action, title))
             })
