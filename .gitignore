@@ -1,0 +1,11 @@
+node_modules/
+.cds-snap/
+.cds-services.json
+*.db
+*.db-wal
+*.db-shm
+gen/
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,33 @@
+{
+  "name": "refinery-mass-balance",
+  "version": "1.0.0",
+  "description": "Agentic AI for Refinery Mass Balance Reconciliation — SAP CAP Application",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@sap/cds": "^10",
+    "@sap/cds-dk": "^10",
+    "express": "^4",
+    "@sap-ai-sdk/ai-api": "^2",
+    "@sap-ai-sdk/orchestration": "^2",
+    "uuid": "^11"
+  },
+  "devDependencies": {
+    "@cap-js/sqlite": "^3",
+    "better-sqlite3": "^13"
+  },
+  "scripts": {
+    "start": "cds-serve",
+    "watch": "cds watch",
+    "test": "cds bind --exec jest"
+  },
+  "cds": {
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": { "url": ":memory:" }
+      }
+    }
+  }
+}
