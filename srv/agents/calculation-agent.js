@@ -88,7 +88,7 @@ class CalculationReconciliationAgent {
                 const bk      = bookStock.find(b => b.tank_ID === tank.ID && b.material_ID === material.ID);
 
                 const closingPhysical = physInv?.quantityMT ??
-                    parseFloat((closingBook * (1 + (Math.random() * 0.006 - 0.003))).toFixed(3));
+                    parseFloat((closingBook * (1 + (Math.random() * 0.010 - 0.003))).toFixed(3));
 
                 const variance    = parseFloat((closingPhysical - closingBook).toFixed(3));
                 const variancePct = closingBook !== 0
@@ -272,9 +272,15 @@ class CalculationReconciliationAgent {
     }
 
     async _getTanks(run) {
+        // When plant_ID is set, filter to that plant; otherwise use all active tanks
+        if (run.plant_ID) {
+            return this.db.run(
+                SELECT.from('refinery.massbalance.Tanks')
+                    .where({ plant_ID: run.plant_ID, isActive: true })
+            );
+        }
         return this.db.run(
-            SELECT.from('refinery.massbalance.Tanks')
-                .where({ plant_ID: run.plant_ID, isActive: true })
+            SELECT.from('refinery.massbalance.Tanks').where({ isActive: true })
         );
     }
 
