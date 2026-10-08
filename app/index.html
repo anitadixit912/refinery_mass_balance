@@ -754,7 +754,14 @@ sap.ui.getCore().attachInit(function () {
               icon: icon,
               type: emphasized ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
               press: (function(a, t) {
-                return function() { pipelineAction(a, t); };
+                return function() {
+                  try {
+                    window.alert("PRESSED: " + a);
+                    pipelineAction(a, t);
+                  } catch(err) {
+                    window.alert("ERROR in " + a + ": " + err.message);
+                  }
+                };
               }(action, title))
             })
           ]
@@ -774,27 +781,20 @@ sap.ui.getCore().attachInit(function () {
       makeStepCard("★",  "sap-icon://process",             "Run Full Pipeline",   "Trigger a new run and execute all steps end-to-end",         "runFullPipeline",         "New Run",     true)
     ]});
 
+    var rcDefs = [
+      { code:"MC", label:"Measurement / Calibration", color:"#e9730c" },
+      { code:"TX", label:"Transaction Error",          color:"#d20a0a" },
+      { code:"MD", label:"Master Data Issue",          color:"#0070f2" },
+      { code:"TF", label:"Transfer / Routing",         color:"#188918" },
+      { code:"PL", label:"Physical Loss / Gain",       color:"#6a1c8a" },
+      { code:"SY", label:"System / Interface",         color:"#696969" }
+    ];
     var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
-    [
-      { code:"MC", label:"Measurement / Calibration" },
-      { code:"TX", label:"Transaction Error" },
-      { code:"MD", label:"Master Data Issue" },
-      { code:"TF", label:"Transfer / Routing" },
-      { code:"PL", label:"Physical Loss / Gain" },
-      { code:"SY", label:"System / Interface" }
-    ].forEach(function(rc) {
-      oRcBox.addItem(new sap.m.Button({
-        text: rc.code + " — " + rc.label,
-        type: sap.m.ButtonType.Ghost,
-        press: (function(r) {
-          return function() {
-            sap.m.MessageBox.information(
-              r.code + ": " + r.label + "\n\nAssigned during Step 06 (Investigate & Classify).\nThe AI ExceptionManagementAgent classifies each variance exception.",
-              { title: "Root Cause: " + r.code }
-            );
-          };
-        }(rc))
-      }).addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom"));
+    rcDefs.forEach(function(rc) {
+      oRcBox.addItem(new sap.ui.core.HTML({
+        content: '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;margin:4px 6px 4px 0;border-radius:14px;background:' + rc.color + ';color:#fff;font-size:0.8125rem;font-family:inherit;white-space:nowrap;pointer-events:none;user-select:none;">' +
+          '<strong>' + rc.code + '</strong>&nbsp;' + rc.label + '</span>'
+      }));
     });
 
     return new sap.m.VBox({ items: [
