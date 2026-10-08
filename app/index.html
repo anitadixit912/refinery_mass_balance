@@ -708,154 +708,115 @@ sap.ui.getCore().attachInit(function () {
     });
   }
 
-  // ─── PIPELINE TAB — interactive 10-step view with run selector ──────────
+  // ─── PIPELINE TAB ────────────────────────────────────────────────────────
   function buildAboutPage() {
-    var STEPS = [
-      { action: "triggerRun",               icon: "sap-icon://download-from-cloud", num:"01", title: "Data Ingestion",      desc: "Collect TANK / MAT / MOV / PHYS / BOOK from SAP IS-Oil & sensors",    btnText: "Ingest" },
-      { action: "validateData",             icon: "sap-icon://validate",             num:"02", title: "Data Validation",     desc: "Completeness, referential integrity, consistency, period alignment",   btnText: "Validate" },
-      { action: "calculateBalance",         icon: "sap-icon://simulate",             num:"03", title: "Balance Calculation", desc: "Opening + Receipts − Issues − Consumption ± Transfers ± Adjustments", btnText: "Calculate" },
-      { action: "reconcileAndCompare",      icon: "sap-icon://synchronize",          num:"04", title: "Reconcile & Compare", desc: "Plant / tank / material-level reconciliation, physical vs book",        btnText: "Reconcile" },
-      { action: "checkTolerances",          icon: "sap-icon://alert",                num:"05", title: "Tolerance Check",     desc: "Assign INFO / ADVISORY / WARNING / CRITICAL severity bands",           btnText: "Check" },
-      { action: "investigateAndClassify",   icon: "sap-icon://search",               num:"06", title: "Investigate & Classify", desc: "Root-cause: MC / TX / MD / TF / PL / SY (Slide 22)",              btnText: "Investigate" },
-      { action: "generateExceptionReport",  icon: "sap-icon://document-text",        num:"07", title: "Exception Report",    desc: "Evidence package + corrective recommendations per exception",         btnText: "Report" },
-      { action: "generateExecutiveSummary", icon: "sap-icon://manager-insight",      num:"08", title: "Executive Summary",   desc: "Management KPI dashboard with period-over-period trends",             btnText: "Summary" },
-      { action: "runFullPipeline",          icon: "sap-icon://process",              num:"★",  title: "Run Full Pipeline",   desc: "Trigger a brand-new run and execute all 10 steps end-to-end (opens dialog)",  btnText: "New Run" }
-    ];
 
-    var ROOT_CAUSES = [
-      { code:"MC", label:"Measurement / Calibration",  color: "#47637d" },
-      { code:"TX", label:"Transaction Error",           color: "#bb0000" },
-      { code:"MD", label:"Master Data Issue",           color: "#bb0000" },
-      { code:"TF", label:"Transfer / Routing",          color: "#e9730c" },
-      { code:"PL", label:"Physical Loss / Gain",        color: "#6a6d70" },
-      { code:"SY", label:"System / Interface",          color: "#0070f2" }
-    ];
+    // Run selector — oPipelineRunSel (outer scope) is populated by loadAll()
+    var oRunSel = new sap.m.Select({ width: "340px", forceSelection: false });
+    oPipelineRunSel = oRunSel;
 
-    // Run selector — populated imperatively by loadAll() so keys are guaranteed correct
-    var oRunSel = new sap.m.Select({
-      width: "340px",
-      forceSelection: false,
-      change: function(e) {
-        var item = e.getSource().getSelectedItem();
-        if (item) sap.m.MessageToast.show("Active run: " + item.getText());
+    function getSelectedRunId() {
+      return oPipelineRunSel.getSelectedKey();
+    }
+
+    function pipelineAction(action, title) {
+      var runId = getSelectedRunId();
+      if (!runId) {
+        sap.m.MessageBox.warning("Please select a run from the 'Active Run' dropdown first.", { title: "No Run Selected" });
+        return;
       }
-    });
-    oPipelineRunSel = oRunSel; // register so loadAll() can populate it
+      if (action === "triggerRun" || action === "runFullPipeline") {
+        openTriggerDialog();
+        return;
+      }
+      runAction(action, runId, title);
+    }
 
-    // Step cards
-    var oStepBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
-    STEPS.forEach(function(step) {
-      var oBtn = new sap.m.Button({
-        text: step.btnText,
-        type: step.num === "★" ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
-        icon: step.icon,
-        press: function() {
-          // Step 01 and ★ both create new runs — open the trigger dialog
-          if (step.action === "triggerRun" || step.action === "runFullPipeline") {
-            openTriggerDialog();
-            return;
-          }
-          var runId = oRunSel.getSelectedKey();
-          if (!runId) {
-            sap.m.MessageToast.show("Select a Run from the dropdown above first.");
-            return;
-          }
-          runAction(step.action, runId, step.title);
-        }
-      });
-
-      oStepBox.addItem(
-        new sap.m.VBox({
-          width: "260px",
-          items: [
-            new sap.m.Panel({
-              expandable: false,
-              content: [
-                new sap.m.HBox({
-                  alignItems: sap.m.FlexAlignItems.Center,
-                  items: [
-                    new sap.ui.core.Icon({
-                      src: step.icon,
-                      size: "1.8rem",
-                      color: step.num === "★" ? "#0070f2" : "#47637d"
-                    }).addStyleClass("sapUiSmallMarginEnd"),
-                    new sap.m.VBox({
-                      items: [
-                        new sap.m.Title({ text: "Step " + step.num + " — " + step.title, level: sap.ui.core.TitleLevel.H5 }),
-                        new sap.m.Text({ text: step.desc }).addStyleClass("sapUiTinyMarginTop")
-                      ]
-                    })
-                  ]
-                }).addStyleClass("sapUiSmallMarginBottom"),
-                oBtn
-              ]
-            })
-          ]
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
-      );
-    });
-
-    // Root cause reference — clickable chips that show the full description
-    var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
-    ROOT_CAUSES.forEach(function(rc) {
-      oRcBox.addItem(
-        new sap.m.Button({
-          text: rc.code + " — " + rc.label,
-          type: sap.m.ButtonType.Ghost,
-          press: function() {
-            sap.m.MessageBox.information(
-              rc.code + ": " + rc.label + "\n\n" +
-              "This root cause category is assigned during Step 08 (Investigate & Classify).\n" +
-              "The AI ExceptionManagementAgent analyzes transaction data, meter readings, and\n" +
-              "master data to classify each variance exception.",
-              { title: "Root Cause: " + rc.code }
-            );
-          }
-        }).addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom")
-      );
-    });
-
-    return new sap.m.VBox({
-      items: [
-        new sap.m.Toolbar({
-          content: [
-            new sap.m.Title({ text: "Agentic Pipeline — Step-by-Step Execution", level: sap.ui.core.TitleLevel.H2 }),
-            new sap.m.ToolbarSpacer(),
-            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh runs", press: loadAll })
-          ]
-        }),
-        new sap.m.MessageStrip({
-          text: "AI Agents: ValidationAnomalyAgent (Step 02) → CalculationReconciliationAgent (Steps 03–06) → ExceptionManagementAgent (Steps 07–08) → ReportGenerationAgent (Steps 09–10). Select a Run and click each step to see the AI agent output.",
-          type: sap.ui.core.MessageType.Information,
-          showIcon: true,
-          showCloseButton: true
-        }).addStyleClass("sapUiSmallMarginBottom"),
-        new sap.m.Panel({
-          headerText: "Select Run to Execute Steps",
+    function makeStepCard(num, icon, title, desc, action, btnText, emphasized) {
+      return new sap.m.VBox({
+        width: "260px",
+        items: [ new sap.m.Panel({
           expandable: false,
           content: [
             new sap.m.HBox({
-              alignItems: sap.m.FlexAlignItems.Center,
+              alignItems: sap.m.FlexAlignItems.Start,
               items: [
-                new sap.m.Label({ text: "Active Run:", labelFor: oRunSel }).addStyleClass("sapUiSmallMarginEnd"),
-                oRunSel,
-                new sap.m.Button({
-                  text: "Trigger New Run",
-                  type: sap.m.ButtonType.Emphasized,
-                  icon: "sap-icon://play",
-                  press: function() { openTriggerDialog(); }                }).addStyleClass("sapUiSmallMarginBegin")
+                new sap.ui.core.Icon({ src: icon, size: "1.8rem", color: emphasized ? "#0070f2" : "#47637d" })
+                  .addStyleClass("sapUiSmallMarginEnd"),
+                new sap.m.VBox({ items: [
+                  new sap.m.Title({ text: "Step " + num + " — " + title, level: sap.ui.core.TitleLevel.H5 }),
+                  new sap.m.Text({ text: desc }).addStyleClass("sapUiTinyMarginTop")
+                ]})
               ]
+            }).addStyleClass("sapUiSmallMarginBottom"),
+            new sap.m.Button({
+              text: btnText,
+              icon: icon,
+              type: emphasized ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
+              press: (function(a, t) {
+                return function() { pipelineAction(a, t); };
+              }(action, title))
             })
           ]
-        }).addStyleClass("sapUiSmallMarginBottom"),
-        new sap.m.Panel({
-          headerText: "Root Cause Categories (Slide 22)",
-          expandable: false,
-          content: [ oRcBox ]
-        }).addStyleClass("sapUiSmallMarginBottom"),
-        oStepBox
-      ]
+        })]
+      }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
+    }
+
+    var oStepBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap, items: [
+      makeStepCard("01", "sap-icon://download-from-cloud", "Data Ingestion",      "Collect TANK/MAT/MOV/PHYS/BOOK from SAP IS-Oil",             "triggerRun",              "Ingest",      false),
+      makeStepCard("02", "sap-icon://validate",            "Data Validation",     "Completeness, referential integrity, consistency",           "validateData",            "Validate",    false),
+      makeStepCard("03", "sap-icon://simulate",            "Balance Calculation", "Opening + Receipts − Issues − Consumption ± Transfers",      "calculateBalance",        "Calculate",   false),
+      makeStepCard("04", "sap-icon://synchronize",         "Reconcile & Compare", "Plant / tank / material reconciliation, physical vs book",   "reconcileAndCompare",     "Reconcile",   false),
+      makeStepCard("05", "sap-icon://alert",               "Tolerance Check",     "Assign INFO / ADVISORY / WARNING / CRITICAL severity",       "checkTolerances",         "Check Tol.",  false),
+      makeStepCard("06", "sap-icon://search",              "Investigate & Classify","Root-cause: MC/TX/MD/TF/PL/SY (Slide 22)",               "investigateAndClassify",  "Investigate", false),
+      makeStepCard("07", "sap-icon://document-text",       "Exception Report",    "Evidence package + corrective recommendations",              "generateExceptionReport", "Report",      false),
+      makeStepCard("08", "sap-icon://manager-insight",     "Executive Summary",   "Management KPI dashboard with period-over-period trends",    "generateExecutiveSummary","Summary",     false),
+      makeStepCard("★",  "sap-icon://process",             "Run Full Pipeline",   "Trigger a new run and execute all steps end-to-end",         "runFullPipeline",         "New Run",     true)
+    ]});
+
+    var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
+    [
+      { code:"MC", label:"Measurement / Calibration" },
+      { code:"TX", label:"Transaction Error" },
+      { code:"MD", label:"Master Data Issue" },
+      { code:"TF", label:"Transfer / Routing" },
+      { code:"PL", label:"Physical Loss / Gain" },
+      { code:"SY", label:"System / Interface" }
+    ].forEach(function(rc) {
+      oRcBox.addItem(new sap.m.Button({
+        text: rc.code + " — " + rc.label,
+        type: sap.m.ButtonType.Ghost,
+        press: (function(r) {
+          return function() {
+            sap.m.MessageBox.information(
+              r.code + ": " + r.label + "\n\nAssigned during Step 06 (Investigate & Classify).\nThe AI ExceptionManagementAgent classifies each variance exception.",
+              { title: "Root Cause: " + r.code }
+            );
+          };
+        }(rc))
+      }).addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom"));
     });
+
+    return new sap.m.VBox({ items: [
+      new sap.m.Toolbar({ content: [
+        new sap.m.Title({ text: "Agentic Pipeline — Step-by-Step Execution", level: sap.ui.core.TitleLevel.H2 }),
+        new sap.m.ToolbarSpacer(),
+        new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh runs", press: function() { loadAll(); } })
+      ]}),
+      new sap.m.Panel({ headerText: "Select Run to Execute Steps", expandable: false, content: [
+        new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
+          new sap.m.Label({ text: "Active Run:" }).addStyleClass("sapUiSmallMarginEnd"),
+          oRunSel,
+          new sap.m.Button({
+            text: "Trigger New Run", type: sap.m.ButtonType.Emphasized, icon: "sap-icon://play",
+            press: function() { openTriggerDialog(); }
+          }).addStyleClass("sapUiSmallMarginBegin")
+        ]})
+      ]}).addStyleClass("sapUiSmallMarginBottom"),
+      new sap.m.Panel({ headerText: "Root Cause Categories (Slide 22)", expandable: false, content: [ oRcBox ] })
+        .addStyleClass("sapUiSmallMarginBottom"),
+      oStepBox
+    ]});
   }
 
   // ─── MAIN APP SHELL ──────────────────────────────────────────────────────
