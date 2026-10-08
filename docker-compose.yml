@@ -7,6 +7,13 @@ services:
     environment:
       - NODE_ENV=development
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # SAP AI Core — set these to activate (overrides Anthropic fallback)
+      - AICORE_CLIENT_ID=${AICORE_CLIENT_ID:-}
+      - AICORE_CLIENT_SECRET=${AICORE_CLIENT_SECRET:-}
+      - AICORE_TOKEN_URL=${AICORE_TOKEN_URL:-}
+      - AICORE_API_URL=${AICORE_API_URL:-}
+      - AICORE_DEPLOYMENT_ID=${AICORE_DEPLOYMENT_ID:-}
+      - AICORE_RESOURCE_GROUP=${AICORE_RESOURCE_GROUP:-default}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4004/', r => process.exit(r.statusCode < 500 ? 0 : 1))"]

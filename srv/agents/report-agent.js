@@ -38,6 +38,7 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const llm = require('./llm-client');
 
 class ReportGenerationAgent {
 
@@ -181,8 +182,17 @@ class ReportGenerationAgent {
             },
         };
 
+        // LLM-generated management narrative
+        const aiNarrative = await this._generateManagementNarrative({
+            period: run.period, periodType: run.periodType,
+            dataCompleteness, tanksReconciled, totalTanks: lines.length,
+            refineryVariancePct, balanceStatus,
+            activeExceptions, pendingApprovals, correctionsPosted,
+            exceptionSummary,
+        });
+
         await this._log(run, 'STEP_10_EXECUTIVE_SUMMARY',
-            `Executive Summary: period=${run.period}, ` +
+            `Executive Summary (${llm.provider} AI): period=${run.period}, ` +
             `dataCompleteness=${dataCompleteness}%, tanksReconciled=${tanksReconciled}, ` +
             `variance=${refineryVariancePct}%, status=${balanceStatus}, ` +
             `exceptions=${activeExceptions}, pendingApprovals=${pendingApprovals}`,
@@ -199,9 +209,30 @@ class ReportGenerationAgent {
             pendingApprovals,
             correctionsPosted,
             exceptionSummary,
-            message             : `Period: ${run.period} | Balance Status: ${balanceStatus} | ` +
+            message: aiNarrative ||
+                `Period: ${run.period} | Balance Status: ${balanceStatus} | ` +
                 `Corrections posted: ${correctionsPosted} | Awaiting approval: ${pendingApprovals}`,
         };
+    }
+
+    async _generateManagementNarrative(kpis) {
+        const systemPrompt =
+`You are a refinery operations director writing a concise executive summary for the daily mass balance report.
+Write 2–3 sentences only. Be specific, use the numbers provided, and highlight any actions required.`;
+
+        const userPrompt =
+`Period: ${kpis.period} (${kpis.periodType})
+Data Completeness: ${kpis.dataCompleteness}%
+Tanks Reconciled: ${kpis.tanksReconciled} of ${kpis.totalTanks}
+Refinery Variance: ${kpis.refineryVariancePct}%
+Balance Status: ${kpis.balanceStatus}
+Active Exceptions: ${kpis.activeExceptions}  (CRITICAL: ${kpis.exceptionSummary?.CRITICAL?.count || 0}, WARNING: ${kpis.exceptionSummary?.WARNING?.count || 0})
+Pending Approvals: ${kpis.pendingApprovals}
+Corrections Posted: ${kpis.correctionsPosted}
+
+Write the executive summary.`;
+
+        return llm.complete(systemPrompt, userPrompt, 300);
     }
 
     async _log(run, agentStep, action, result) {

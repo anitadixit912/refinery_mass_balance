@@ -9,3 +9,4 @@ gen/
 .env.*
 !.env.example
 *.log
+.env.local
