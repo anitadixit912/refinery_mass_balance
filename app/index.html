@@ -106,72 +106,81 @@ sap.ui.getCore().attachInit(function () {
              COMPLETED:"Success", FAILED:"Error", IN_PROGRESS:"Warning" }[s] || "None";
   }
 
-  // ─── TRIGGER DIALOG ───────────────────────────────────────────────────────
-  function buildTriggerDialog(plants) {
-    var oPlantItems = plants.map(function(p){
-      return new sap.ui.core.ListItem({ key: p.ID, text: p.plantCode + " – " + p.plantName });
-    });
-
-    var oPlantSel = new sap.m.Select("trigPlant", {
-      width: "100%",
-      items: [new sap.ui.core.ListItem({ key:"", text:"Select Plant…" })].concat(oPlantItems)
-    });
-    var oPeriodType = new sap.m.Select("trigPeriodType", {
-      width: "100%",
-      items: [
-        new sap.ui.core.ListItem({ key:"DAILY",   text:"Daily" }),
-        new sap.ui.core.ListItem({ key:"MONTHLY", text:"Monthly" })
-      ]
-    });
-    var oPeriod = new sap.m.DatePicker("trigPeriod", {
-      width: "100%", displayFormat: "yyyy-MM-dd", valueFormat: "yyyy-MM-dd",
-      value: new Date().toISOString().slice(0,10)
-    });
-
-    var oDialog = new sap.m.Dialog({
-      title: "Trigger New Mass Balance Run",
-      icon: "sap-icon://play",
-      content: [
-        new sap.ui.layout.form.SimpleForm({
-          layout: sap.ui.layout.form.SimpleFormLayout.ResponsiveGridLayout,
-          content: [
-            new sap.m.Label({ text: "Plant", required: true }),
-            oPlantSel,
-            new sap.m.Label({ text: "Period Type", required: true }),
-            oPeriodType,
-            new sap.m.Label({ text: "Period", required: true }),
-            oPeriod
-          ]
-        })
-      ],
-      beginButton: new sap.m.Button({
-        text: "Trigger Run",
-        type: sap.m.ButtonType.Emphasized,
-        press: function() {
-          var plantId = sap.ui.getCore().byId("trigPlant").getSelectedKey();
-          var ptype   = sap.ui.getCore().byId("trigPeriodType").getSelectedKey();
-          var period  = sap.ui.getCore().byId("trigPeriod").getValue();
-          if (!plantId || !period) {
-            sap.m.MessageToast.show("Please fill all required fields."); return;
-          }
-          oDialog.setBusy(true);
-          odataPost(BASE + "/MassBalanceRuns/triggerRun", {
-            plantId: plantId, periodType: ptype, period: period, triggerType: "ON_DEMAND"
-          }).then(function(result){
-            oDialog.setBusy(false);
-            oDialog.close();
-            sap.m.MessageToast.show("Run triggered: " + (result.runId || "created"));
-            loadAll();
-          }).catch(function(e){
-            oDialog.setBusy(false);
-            sap.m.MessageBox.error("Failed to trigger run: " + e.message);
-          });
+  // ─── TRIGGER DIALOG (singleton — created once, reused for both tab buttons) ──
+  var oPlantSel = new sap.m.Select({
+    width: "100%",
+    forceSelection: false,
+    items: {
+      path: "/plants",
+      template: new sap.ui.core.ListItem({
+        key: "{ID}",
+        text: {
+          parts: ["plantCode", "plantName"],
+          formatter: function(c, n){ return c + " – " + n; }
         }
-      }),
-      endButton: new sap.m.Button({ text: "Cancel", press: function(){ oDialog.close(); } })
-    });
-    return oDialog;
-  }
+      })
+    }
+  });
+
+  var oPeriodType = new sap.m.Select({
+    width: "100%",
+    items: [
+      new sap.ui.core.ListItem({ key:"DAILY",   text:"Daily" }),
+      new sap.ui.core.ListItem({ key:"MONTHLY", text:"Monthly" })
+    ]
+  });
+
+  var oPeriod = new sap.m.DatePicker({
+    width: "100%", displayFormat: "yyyy-MM-dd", valueFormat: "yyyy-MM-dd",
+    value: new Date().toISOString().slice(0,10)
+  });
+
+  var oTriggerDialog = new sap.m.Dialog({
+    title: "Trigger New Mass Balance Run",
+    icon: "sap-icon://play",
+    content: [
+      new sap.ui.layout.form.SimpleForm({
+        layout: sap.ui.layout.form.SimpleFormLayout.ResponsiveGridLayout,
+        content: [
+          new sap.m.Label({ text: "Plant", required: true }),
+          oPlantSel,
+          new sap.m.Label({ text: "Period Type", required: true }),
+          oPeriodType,
+          new sap.m.Label({ text: "Period", required: true }),
+          oPeriod
+        ]
+      })
+    ],
+    beginButton: new sap.m.Button({
+      text: "Trigger Run",
+      type: sap.m.ButtonType.Emphasized,
+      press: function() {
+        var plantId = oPlantSel.getSelectedKey();
+        var ptype   = oPeriodType.getSelectedKey();
+        var period  = oPeriod.getValue();
+        if (!plantId || !period) {
+          sap.m.MessageToast.show("Please select a Plant and Period."); return;
+        }
+        oTriggerDialog.setBusy(true);
+        odataPost(BASE + "/MassBalanceRuns/triggerRun", {
+          plantId: plantId, periodType: ptype, period: period, triggerType: "ON_DEMAND"
+        }).then(function(result){
+          oTriggerDialog.setBusy(false);
+          oTriggerDialog.close();
+          sap.m.MessageToast.show("Run triggered: " + (result.runId || "created"));
+          loadAll();
+        }).catch(function(e){
+          oTriggerDialog.setBusy(false);
+          sap.m.MessageBox.error("Failed to trigger run: " + e.message);
+        });
+      }
+    }),
+    endButton: new sap.m.Button({
+      text: "Cancel",
+      press: function(){ oTriggerDialog.close(); }
+    })
+  });
+  oTriggerDialog.setModel(oModel);
 
   // ─── PIPELINE ACTIONS ─────────────────────────────────────────────────────
   function runAction(path, runId, label) {
@@ -194,79 +203,100 @@ sap.ui.getCore().attachInit(function () {
 
   // ─── KPI TILES ───────────────────────────────────────────────────────────
   function buildKpiSection() {
+    function kpiTile(title, subtitle, icon, valuePath, stateExpr) {
+      return new sap.m.VBox({
+        width: "200px",
+        items: [
+          new sap.m.Panel({
+            expandable: false,
+            content: [
+              new sap.m.HBox({
+                alignItems: sap.m.FlexAlignItems.Center,
+                items: [
+                  new sap.ui.core.Icon({ src: icon, size: "1.5rem", color: "#0070f2" })
+                    .addStyleClass("sapUiSmallMarginEnd"),
+                  new sap.m.VBox({
+                    items: [
+                      new sap.m.Title({ text: title, level: sap.ui.core.TitleLevel.H5 }),
+                      new sap.m.Text({ text: subtitle }).addStyleClass("sapUiTinyMarginTop")
+                    ]
+                  })
+                ]
+              }).addStyleClass("sapUiSmallMarginBottom"),
+              new sap.m.ObjectStatus({
+                text: valuePath,
+                state: stateExpr
+              }).addStyleClass("sapMTitle")
+            ]
+          })
+        ]
+      }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
+    }
+
     return new sap.m.FlexBox({
       wrap: sap.m.FlexWrap.Wrap,
       justifyContent: sap.m.FlexJustifyContent.Start,
       items: [
-        new sap.f.Card({
-          width: "220px",
-          header: new sap.f.cards.Header({
-            title: "Total Runs",
-            subtitle: "All periods",
-            iconSrc: "sap-icon://history"
-          }),
-          content: new sap.m.VBox({
-            items: [
-              new sap.m.Text({ text: "{/kpi/totalRuns}", wrapping: false })
-                .addStyleClass("sapUiTinyMarginBeginEnd")
-                .addStyleClass("sapMTitle")
-            ]
-          })
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+        new sap.m.VBox({ width: "200px", items: [
+          new sap.m.Panel({ expandable: false, content: [
+            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
+              new sap.ui.core.Icon({ src: "sap-icon://history", size: "1.5rem", color: "#0070f2" }).addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: "Total Runs", level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: "All periods" }).addStyleClass("sapUiTinyMarginTop")
+              ]})
+            ]}).addStyleClass("sapUiSmallMarginBottom"),
+            new sap.m.Title({ text: "{/kpi/totalRuns}", level: sap.ui.core.TitleLevel.H2 })
+          ]})
+        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
 
-        new sap.f.Card({
-          width: "220px",
-          header: new sap.f.cards.Header({
-            title: "Critical Exceptions",
-            subtitle: "Require action",
-            iconSrc: "sap-icon://alert"
-          }),
-          content: new sap.m.VBox({
-            items: [
-              new sap.m.ObjectStatus({
-                text: "{/kpi/criticalExceptions}",
-                state: "{= ${/kpi/criticalExceptions} > 0 ? 'Error' : 'Success' }"
-              }).addStyleClass("sapUiTinyMarginBeginEnd")
-            ]
-          })
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+        new sap.m.VBox({ width: "200px", items: [
+          new sap.m.Panel({ expandable: false, content: [
+            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
+              new sap.ui.core.Icon({ src: "sap-icon://alert", size: "1.5rem", color: "#bb0000" }).addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: "Critical Exceptions", level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: "Require action" }).addStyleClass("sapUiTinyMarginTop")
+              ]})
+            ]}).addStyleClass("sapUiSmallMarginBottom"),
+            new sap.m.ObjectStatus({
+              text: "{/kpi/criticalExceptions}",
+              state: "{= ${/kpi/criticalExceptions} > 0 ? 'Error' : 'Success' }"
+            }).addStyleClass("sapMTitle")
+          ]})
+        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
 
-        new sap.f.Card({
-          width: "220px",
-          header: new sap.f.cards.Header({
-            title: "Pending Approvals",
-            subtitle: "Awaiting human review",
-            iconSrc: "sap-icon://pending"
-          }),
-          content: new sap.m.VBox({
-            items: [
-              new sap.m.ObjectStatus({
-                text: "{/kpi/pendingApprovals}",
-                state: "{= ${/kpi/pendingApprovals} > 0 ? 'Warning' : 'Success' }"
-              }).addStyleClass("sapUiTinyMarginBeginEnd")
-            ]
-          })
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+        new sap.m.VBox({ width: "200px", items: [
+          new sap.m.Panel({ expandable: false, content: [
+            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
+              new sap.ui.core.Icon({ src: "sap-icon://pending", size: "1.5rem", color: "#e9730c" }).addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: "Pending Approvals", level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: "Awaiting review" }).addStyleClass("sapUiTinyMarginTop")
+              ]})
+            ]}).addStyleClass("sapUiSmallMarginBottom"),
+            new sap.m.ObjectStatus({
+              text: "{/kpi/pendingApprovals}",
+              state: "{= ${/kpi/pendingApprovals} > 0 ? 'Warning' : 'Success' }"
+            }).addStyleClass("sapMTitle")
+          ]})
+        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
 
-        new sap.f.Card({
-          width: "220px",
-          header: new sap.f.cards.Header({
-            title: "Last Balance Status",
-            subtitle: "Most recent run",
-            iconSrc: "sap-icon://status-in-process"
-          }),
-          content: new sap.m.VBox({
-            items: [
-              new sap.m.ObjectStatus({
-                text: "{/kpi/balanceStatus}",
-                state: {
-                  path: "/kpi/balanceStatus",
-                  formatter: function(s) { return statusState(s); }
-                }
-              }).addStyleClass("sapUiTinyMarginBeginEnd")
-            ]
-          })
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+        new sap.m.VBox({ width: "200px", items: [
+          new sap.m.Panel({ expandable: false, content: [
+            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
+              new sap.ui.core.Icon({ src: "sap-icon://status-in-process", size: "1.5rem", color: "#188918" }).addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: "Last Balance", level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: "Most recent run" }).addStyleClass("sapUiTinyMarginTop")
+              ]})
+            ]}).addStyleClass("sapUiSmallMarginBottom"),
+            new sap.m.ObjectStatus({
+              text: "{/kpi/balanceStatus}",
+              state: { path: "/kpi/balanceStatus", formatter: function(s){ return statusState(s); } }
+            }).addStyleClass("sapMTitle")
+          ]})
+        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
       ]
     }).addStyleClass("sapUiSmallMarginTop sapUiSmallMarginBottom");
   }
@@ -353,10 +383,7 @@ sap.ui.getCore().attachInit(function () {
       text: "Trigger New Run",
       type: sap.m.ButtonType.Emphasized,
       icon: "sap-icon://play",
-      press: function() {
-        var oDialog = buildTriggerDialog(oModel.getProperty("/plants"));
-        oDialog.open();
-      }
+      press: function() { oTriggerDialog.open(); }
     });
 
     return new sap.m.VBox({
@@ -629,52 +656,110 @@ sap.ui.getCore().attachInit(function () {
     });
   }
 
-  // ─── PIPELINE DIAGRAM (visual 10-step) ───────────────────────────────────
+  // ─── PIPELINE TAB — interactive 10-step view with run selector ──────────
   function buildAboutPage() {
-    var steps = [
-      { icon: "sap-icon://download-from-cloud", title: "1. Data Ingestion",      desc: "Collect TANK / MAT / MOV / PHYS / BOOK from SAP IS-Oil & sensors" },
-      { icon: "sap-icon://validate",             title: "2. Data Validation",     desc: "Completeness, referential integrity, consistency, period alignment" },
-      { icon: "sap-icon://simulate",             title: "3. Balance Calculation", desc: "Opening + Receipts − Issues − Consumption ± Transfers ± Adjustments" },
-      { icon: "sap-icon://synchronize",          title: "4. Reconciliation",      desc: "Aggregate at plant / tank / material level" },
-      { icon: "sap-icon://compare",              title: "5. Physical vs Book",    desc: "Compare dip-read physical stock vs SAP MARD book quantity" },
-      { icon: "sap-icon://alert",                title: "6. Tolerance Check",     desc: "Assign INFO / ADVISORY / WARNING / CRITICAL severity bands" },
-      { icon: "sap-icon://search",               title: "7. Investigation",       desc: "Autonomous root-cause analysis across all flagged variances" },
-      { icon: "sap-icon://tag",                  title: "8. Classification",      desc: "MC / TX / MD / TF / PL / SY root-cause categories" },
-      { icon: "sap-icon://document-text",        title: "9. Exception Report",    desc: "Evidence package + corrective recommendations" },
-      { icon: "sap-icon://manager-insight",      title: "10. Executive Summary",  desc: "Management KPI dashboard with period-over-period trends" }
+    var STEPS = [
+      { action: "triggerRun",               icon: "sap-icon://download-from-cloud", num:"01", title: "Data Ingestion",      desc: "Collect TANK / MAT / MOV / PHYS / BOOK from SAP IS-Oil & sensors",    btnText: "Ingest" },
+      { action: "validateData",             icon: "sap-icon://validate",             num:"02", title: "Data Validation",     desc: "Completeness, referential integrity, consistency, period alignment",   btnText: "Validate" },
+      { action: "calculateBalance",         icon: "sap-icon://simulate",             num:"03", title: "Balance Calculation", desc: "Opening + Receipts − Issues − Consumption ± Transfers ± Adjustments", btnText: "Calculate" },
+      { action: "reconcileAndCompare",      icon: "sap-icon://synchronize",          num:"04", title: "Reconcile & Compare", desc: "Plant / tank / material-level reconciliation, physical vs book",        btnText: "Reconcile" },
+      { action: "checkTolerances",          icon: "sap-icon://alert",                num:"05", title: "Tolerance Check",     desc: "Assign INFO / ADVISORY / WARNING / CRITICAL severity bands",           btnText: "Check" },
+      { action: "investigateAndClassify",   icon: "sap-icon://search",               num:"06", title: "Investigate & Classify", desc: "Root-cause: MC / TX / MD / TF / PL / SY (Slide 22)",              btnText: "Investigate" },
+      { action: "generateExceptionReport",  icon: "sap-icon://document-text",        num:"07", title: "Exception Report",    desc: "Evidence package + corrective recommendations per exception",         btnText: "Report" },
+      { action: "generateExecutiveSummary", icon: "sap-icon://manager-insight",      num:"08", title: "Executive Summary",   desc: "Management KPI dashboard with period-over-period trends",             btnText: "Summary" },
+      { action: "runFullPipeline",          icon: "sap-icon://process",              num:"★",  title: "Run Full Pipeline",   desc: "Execute all 10 steps end-to-end with human approval gates",           btnText: "Run All" }
     ];
 
-    var oGrid = new sap.m.FlexBox({
-      wrap: sap.m.FlexWrap.Wrap,
-      justifyContent: sap.m.FlexJustifyContent.Start
+    var ROOT_CAUSES = [
+      { code:"MC", label:"Measurement / Calibration",  color: sap.ui.core.IconColor.Neutral  },
+      { code:"TX", label:"Transaction Error",           color: sap.ui.core.IconColor.Critical },
+      { code:"MD", label:"Master Data Issue",           color: sap.ui.core.IconColor.Critical },
+      { code:"TF", label:"Transfer / Routing",          color: sap.ui.core.IconColor.Default  },
+      { code:"PL", label:"Physical Loss / Gain",        color: sap.ui.core.IconColor.Negative },
+      { code:"SY", label:"System / Interface",          color: sap.ui.core.IconColor.Neutral  }
+    ];
+
+    // Run selector
+    var oRunSel = new sap.m.Select({
+      width: "320px",
+      forceSelection: false,
+      change: function() {},
+      items: {
+        path: "/runs",
+        template: new sap.ui.core.ListItem({
+          key: "{ID}",
+          text: { parts: ["runId","period","runStatus"], formatter: function(r,p,s){ return (r||"?") + " | " + (p||"?") + " | " + (s||"?"); } }
+        })
+      }
     });
-    steps.forEach(function(s) {
-      oGrid.addItem(
-        new sap.f.Card({
-          width: "280px",
-          header: new sap.f.cards.Header({ title: s.title, iconSrc: s.icon }),
-          content: new sap.m.VBox({
-            items: [ new sap.m.Text({ text: s.desc }).addStyleClass("sapUiTinyMarginBeginEnd sapUiTinyMarginBottom") ]
-          })
+    oRunSel.setModel(oModel);
+
+    // Step cards
+    var oStepBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
+    STEPS.forEach(function(step) {
+      var oBtn = new sap.m.Button({
+        text: step.btnText,
+        type: step.num === "★" ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
+        icon: step.icon,
+        press: function() {
+          var runId = oRunSel.getSelectedKey();
+          if (!runId) {
+            sap.m.MessageToast.show("Select a Run first from the dropdown above.");
+            return;
+          }
+          if (step.action === "triggerRun" || step.action === "runFullPipeline") {
+            sap.m.MessageBox.confirm("Execute: " + step.title + "?", {
+              onClose: function(a) {
+                if (a !== sap.m.MessageBox.Action.OK) return;
+                runAction(step.action, runId, step.title);
+              }
+            });
+          } else {
+            runAction(step.action, runId, step.title);
+          }
+        }
+      });
+
+      oStepBox.addItem(
+        new sap.m.VBox({
+          width: "260px",
+          items: [
+            new sap.m.Panel({
+              expandable: false,
+              content: [
+                new sap.m.HBox({
+                  alignItems: sap.m.FlexAlignItems.Center,
+                  items: [
+                    new sap.ui.core.Icon({
+                      src: step.icon,
+                      size: "1.8rem",
+                      color: step.num === "★" ? "#0070f2" : "#47637d"
+                    }).addStyleClass("sapUiSmallMarginEnd"),
+                    new sap.m.VBox({
+                      items: [
+                        new sap.m.Title({ text: "Step " + step.num + " — " + step.title, level: sap.ui.core.TitleLevel.H5 }),
+                        new sap.m.Text({ text: step.desc }).addStyleClass("sapUiTinyMarginTop")
+                      ]
+                    })
+                  ]
+                }).addStyleClass("sapUiSmallMarginBottom"),
+                oBtn
+              ]
+            })
+          ]
         }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
       );
     });
 
-    var rootCauses = [
-      { code:"MC", label:"Measurement / Calibration", color:"#0070f2" },
-      { code:"TX", label:"Transaction Error",          color:"#e9730c" },
-      { code:"MD", label:"Master Data Issue",          color:"#e6a000" },
-      { code:"TF", label:"Transfer / Routing",         color:"#188918" },
-      { code:"PL", label:"Physical Loss / Gain",       color:"#bb0000" },
-      { code:"SY", label:"System / Interface",         color:"#6a6d70" }
-    ];
-    var oRootCauseBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
-    rootCauses.forEach(function(rc) {
-      oRootCauseBox.addItem(
-        new sap.m.GenericTag({
+    // Root cause reference
+    var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
+    ROOT_CAUSES.forEach(function(rc) {
+      oRcBox.addItem(
+        new sap.m.Button({
           text: rc.code + " — " + rc.label,
-          status: "Information"
-        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+          type: sap.m.ButtonType.Ghost,
+          enabled: false
+        }).addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom")
       );
     });
 
@@ -682,15 +767,36 @@ sap.ui.getCore().attachInit(function () {
       items: [
         new sap.m.Toolbar({
           content: [
-            new sap.m.Title({ text: "Agentic AI Pipeline — 10 Steps", level: sap.ui.core.TitleLevel.H2 })
+            new sap.m.Title({ text: "Agentic Pipeline — Step-by-Step Execution", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh runs", press: loadAll })
           ]
         }),
         new sap.m.Panel({
+          headerText: "Select Run to Execute Steps",
+          expandable: false,
+          content: [
+            new sap.m.HBox({
+              alignItems: sap.m.FlexAlignItems.Center,
+              items: [
+                new sap.m.Label({ text: "Active Run:", labelFor: oRunSel }).addStyleClass("sapUiSmallMarginEnd"),
+                oRunSel,
+                new sap.m.Button({
+                  text: "Trigger New Run",
+                  type: sap.m.ButtonType.Emphasized,
+                  icon: "sap-icon://play",
+                  press: function() { oTriggerDialog.open(); }
+                }).addStyleClass("sapUiSmallMarginBegin")
+              ]
+            })
+          ]
+        }).addStyleClass("sapUiSmallMarginBottom"),
+        new sap.m.Panel({
           headerText: "Root Cause Categories (Slide 22)",
           expandable: false,
-          content: oRootCauseBox
+          content: [ oRcBox ]
         }).addStyleClass("sapUiSmallMarginBottom"),
-        oGrid
+        oStepBox
       ]
     });
   }
