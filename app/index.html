@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refinery Mass Balance | Agentic AI</title>
+<script id="sap-ui-bootstrap"
+  src="https://ui5.sap.com/1.120.17/resources/sap-ui-core.js"
+  data-sap-ui-theme="sap_horizon"
+  data-sap-ui-libs="sap.m,sap.ui.layout,sap.f,sap.tnt,sap.ui.core,sap.ui.table"
+  data-sap-ui-compatVersion="edge"
+  data-sap-ui-frameOptions="allow"
+  data-sap-ui-async="true">
+</script>
+<style>
+  .kpi-card { min-width: 180px; }
+  .severity-CRITICAL { color: #bb0000 !important; font-weight: bold; }
+  .severity-WARNING  { color: #e9730c !important; font-weight: bold; }
+  .severity-ADVISORY { color: #e6a000 !important; }
+  .severity-INFO     { color: #0070f2 !important; }
+  .status-BALANCED   { color: #188918 !important; font-weight: bold; }
+  .status-ADVISORY   { color: #e6a000 !important; }
+  .status-OUT_OF_BALANCE { color: #bb0000 !important; font-weight: bold; }
+  .pipeline-step-done { color: #188918; }
+  .pipeline-step-pending { color: #707070; }
+  .section-header { font-size: 1.2rem; font-weight: 600; color: #32363a; margin: 1rem 0 0.5rem 0; }
+  .empty-state { text-align: center; padding: 3rem; color: #6a6d70; }
+  .empty-state .empty-icon { font-size: 4rem; margin-bottom: 1rem; }
+</style>
+<script>
+sap.ui.getCore().attachInit(function () {
+  "use strict";
+
+  // ─── state ───────────────────────────────────────────────────────────────
+  var BASE   = "/api/mass-balance";
+  var ADMIN  = "/api/admin";
+
+  var oModel = new sap.ui.model.json.JSONModel({
+    runs: [], exceptions: [], approvals: [], plants: [], materials: [], tolerances: [],
+    kpi: { totalRuns: 0, criticalExceptions: 0, pendingApprovals: 0, balanceStatus: "—" },
+    selectedRunId: null,
+    busy: false
+  });
+
+  // ─── helpers ─────────────────────────────────────────────────────────────
+  function odata(path) {
+    return fetch(path, { headers: { Accept: "application/json" } })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ return d.value !== undefined ? d.value : d; });
+  }
+
+  function odataPost(path, body) {
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    }).then(function(r){ return r.json(); });
+  }
+
+  function loadAll() {
+    oModel.setProperty("/busy", true);
+    Promise.all([
+      odata(BASE + "/MassBalanceRuns?$orderby=createdAt desc&$top=50"),
+      odata(BASE + "/Exceptions?$orderby=detectedAt desc&$top=100"),
+      odata(BASE + "/ApprovalRequests?$orderby=requestedAt desc&$top=100"),
+      odata(ADMIN + "/Plants"),
+      odata(ADMIN + "/Materials"),
+      odata(ADMIN + "/ToleranceConfigs")
+    ]).then(function(results) {
+      var runs   = results[0];
+      var excs   = results[1];
+      var apprs  = results[2];
+      var plants = results[3];
+      var mats   = results[4];
+      var tols   = results[5];
+
+      var critCount = excs.filter(function(e){ return e.severity === "CRITICAL"; }).length;
+      var pendCount = apprs.filter(function(a){ return a.approvalStatus === "PENDING"; }).length;
+      var lastRun   = runs.length ? runs[0] : null;
+
+      oModel.setData({
+        runs: runs, exceptions: excs, approvals: apprs,
+        plants: plants, materials: mats, tolerances: tols,
+        kpi: {
+          totalRuns: runs.length,
+          criticalExceptions: critCount,
+          pendingApprovals: pendCount,
+          balanceStatus: lastRun ? lastRun.balanceStatus || "—" : "—"
+        },
+        selectedRunId: null,
+        busy: false
+      });
+    }).catch(function(e){
+      oModel.setProperty("/busy", false);
+      sap.m.MessageToast.show("Error loading data: " + e.message);
+    });
+  }
+
+  // ─── severity badge ───────────────────────────────────────────────────────
+  function severityState(sev) {
+    return { CRITICAL:"Error", WARNING:"Warning", ADVISORY:"Warning", INFO:"Information" }[sev] || "None";
+  }
+
+  function statusState(s) {
+    return { BALANCED:"Success", ADVISORY:"Warning", OUT_OF_BALANCE:"Error",
+             COMPLETED:"Success", FAILED:"Error", IN_PROGRESS:"Warning" }[s] || "None";
+  }
+
+  // ─── TRIGGER DIALOG ───────────────────────────────────────────────────────
+  function buildTriggerDialog(plants) {
+    var oPlantItems = plants.map(function(p){
+      return new sap.ui.core.ListItem({ key: p.ID, text: p.plantCode + " – " + p.plantName });
+    });
+
+    var oPlantSel = new sap.m.Select("trigPlant", {
+      width: "100%",
+      items: [new sap.ui.core.ListItem({ key:"", text:"Select Plant…" })].concat(oPlantItems)
+    });
+    var oPeriodType = new sap.m.Select("trigPeriodType", {
+      width: "100%",
+      items: [
+        new sap.ui.core.ListItem({ key:"DAILY",   text:"Daily" }),
+        new sap.ui.core.ListItem({ key:"MONTHLY", text:"Monthly" })
+      ]
+    });
+    var oPeriod = new sap.m.DatePicker("trigPeriod", {
+      width: "100%", displayFormat: "yyyy-MM-dd", valueFormat: "yyyy-MM-dd",
+      value: new Date().toISOString().slice(0,10)
+    });
+
+    var oDialog = new sap.m.Dialog({
+      title: "Trigger New Mass Balance Run",
+      icon: "sap-icon://play",
+      content: [
+        new sap.ui.layout.form.SimpleForm({
+          layout: sap.ui.layout.form.SimpleFormLayout.ResponsiveGridLayout,
+          content: [
+            new sap.m.Label({ text: "Plant", required: true }),
+            oPlantSel,
+            new sap.m.Label({ text: "Period Type", required: true }),
+            oPeriodType,
+            new sap.m.Label({ text: "Period", required: true }),
+            oPeriod
+          ]
+        })
+      ],
+      beginButton: new sap.m.Button({
+        text: "Trigger Run",
+        type: sap.m.ButtonType.Emphasized,
+        press: function() {
+          var plantId = sap.ui.getCore().byId("trigPlant").getSelectedKey();
+          var ptype   = sap.ui.getCore().byId("trigPeriodType").getSelectedKey();
+          var period  = sap.ui.getCore().byId("trigPeriod").getValue();
+          if (!plantId || !period) {
+            sap.m.MessageToast.show("Please fill all required fields."); return;
+          }
+          oDialog.setBusy(true);
+          odataPost(BASE + "/MassBalanceRuns/triggerRun", {
+            plantId: plantId, periodType: ptype, period: period, triggerType: "ON_DEMAND"
+          }).then(function(result){
+            oDialog.setBusy(false);
+            oDialog.close();
+            sap.m.MessageToast.show("Run triggered: " + (result.runId || "created"));
+            loadAll();
+          }).catch(function(e){
+            oDialog.setBusy(false);
+            sap.m.MessageBox.error("Failed to trigger run: " + e.message);
+          });
+        }
+      }),
+      endButton: new sap.m.Button({ text: "Cancel", press: function(){ oDialog.close(); } })
+    });
+    return oDialog;
+  }
+
+  // ─── PIPELINE ACTIONS ─────────────────────────────────────────────────────
+  function runAction(path, runId, label) {
+    sap.m.MessageBox.confirm("Run " + label + " for this run?", {
+      onClose: function(action) {
+        if (action !== sap.m.MessageBox.Action.OK) return;
+        oModel.setProperty("/busy", true);
+        odataPost(BASE + "/MassBalanceRuns/" + runId + "/" + path, {})
+          .then(function(r){
+            oModel.setProperty("/busy", false);
+            sap.m.MessageToast.show(label + " completed.");
+            loadAll();
+          }).catch(function(e){
+            oModel.setProperty("/busy", false);
+            sap.m.MessageBox.error(label + " failed: " + e.message);
+          });
+      }
+    });
+  }
+
+  // ─── KPI TILES ───────────────────────────────────────────────────────────
+  function buildKpiSection() {
+    return new sap.m.FlexBox({
+      wrap: sap.m.FlexWrap.Wrap,
+      justifyContent: sap.m.FlexJustifyContent.Start,
+      items: [
+        new sap.f.Card({
+          width: "220px",
+          header: new sap.f.cards.Header({
+            title: "Total Runs",
+            subtitle: "All periods",
+            iconSrc: "sap-icon://history"
+          }),
+          content: new sap.m.VBox({
+            items: [
+              new sap.m.Text({ text: "{/kpi/totalRuns}", wrapping: false })
+                .addStyleClass("sapUiTinyMarginBeginEnd")
+                .addStyleClass("sapMTitle")
+            ]
+          })
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+
+        new sap.f.Card({
+          width: "220px",
+          header: new sap.f.cards.Header({
+            title: "Critical Exceptions",
+            subtitle: "Require action",
+            iconSrc: "sap-icon://alert"
+          }),
+          content: new sap.m.VBox({
+            items: [
+              new sap.m.ObjectStatus({
+                text: "{/kpi/criticalExceptions}",
+                state: "{= ${/kpi/criticalExceptions} > 0 ? 'Error' : 'Success' }"
+              }).addStyleClass("sapUiTinyMarginBeginEnd")
+            ]
+          })
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+
+        new sap.f.Card({
+          width: "220px",
+          header: new sap.f.cards.Header({
+            title: "Pending Approvals",
+            subtitle: "Awaiting human review",
+            iconSrc: "sap-icon://pending"
+          }),
+          content: new sap.m.VBox({
+            items: [
+              new sap.m.ObjectStatus({
+                text: "{/kpi/pendingApprovals}",
+                state: "{= ${/kpi/pendingApprovals} > 0 ? 'Warning' : 'Success' }"
+              }).addStyleClass("sapUiTinyMarginBeginEnd")
+            ]
+          })
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
+
+        new sap.f.Card({
+          width: "220px",
+          header: new sap.f.cards.Header({
+            title: "Last Balance Status",
+            subtitle: "Most recent run",
+            iconSrc: "sap-icon://status-in-process"
+          }),
+          content: new sap.m.VBox({
+            items: [
+              new sap.m.ObjectStatus({
+                text: "{/kpi/balanceStatus}",
+                state: {
+                  path: "/kpi/balanceStatus",
+                  formatter: function(s) { return statusState(s); }
+                }
+              }).addStyleClass("sapUiTinyMarginBeginEnd")
+            ]
+          })
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+      ]
+    }).addStyleClass("sapUiSmallMarginTop sapUiSmallMarginBottom");
+  }
+
+  // ─── RUNS TABLE ──────────────────────────────────────────────────────────
+  function buildRunsPage() {
+    var oTable = new sap.m.Table({
+      growing: true,
+      growingThreshold: 20,
+      noDataText: "No runs yet. Trigger the first run above.",
+      columns: [
+        new sap.m.Column({ header: new sap.m.Label({ text: "Run ID" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Period" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Type" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Balance" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Variance %" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Completeness" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Actions" }) })
+      ],
+      items: {
+        path: "/runs",
+        template: new sap.m.ColumnListItem({
+          vAlign: sap.ui.core.VerticalAlign.Middle,
+          cells: [
+            new sap.m.Text({ text: "{runId}" }),
+            new sap.m.Text({ text: "{period}" }),
+            new sap.m.ObjectStatus({ text: "{periodType}", state: "Information" }),
+            new sap.m.ObjectStatus({
+              text: "{runStatus}",
+              state: { path: "runStatus", formatter: function(s){ return statusState(s); } }
+            }),
+            new sap.m.ObjectStatus({
+              text: "{balanceStatus}",
+              state: { path: "balanceStatus", formatter: function(s){ return statusState(s); } }
+            }),
+            new sap.m.Text({
+              text: {
+                path: "refineryVariancePct",
+                formatter: function(v){ return v !== null && v !== undefined ? (parseFloat(v)*100).toFixed(3) + " %" : "—"; }
+              }
+            }),
+            new sap.m.ProgressIndicator({
+              percentValue: { path: "dataCompleteness", formatter: function(v){ return v ? parseFloat(v)*100 : 0; } },
+              displayValue: { path: "dataCompleteness", formatter: function(v){ return v ? (parseFloat(v)*100).toFixed(0)+"%" : "0%"; } },
+              state: sap.ui.core.ValueState.Success,
+              width: "120px"
+            }),
+            new sap.m.HBox({
+              items: [
+                new sap.m.Button({
+                  icon: "sap-icon://simulate",
+                  tooltip: "Run Full Pipeline",
+                  type: sap.m.ButtonType.Emphasized,
+                  press: function(e) {
+                    var ctx = e.getSource().getBindingContext();
+                    runAction("runFullPipeline", ctx.getProperty("ID"), "Full Pipeline");
+                  }
+                }),
+                new sap.m.Button({
+                  icon: "sap-icon://validate",
+                  tooltip: "Validate Data",
+                  press: function(e) {
+                    var ctx = e.getSource().getBindingContext();
+                    runAction("validateData", ctx.getProperty("ID"), "Validate Data");
+                  }
+                }).addStyleClass("sapUiTinyMarginBegin"),
+                new sap.m.Button({
+                  icon: "sap-icon://detail-view",
+                  tooltip: "Generate Report",
+                  press: function(e) {
+                    var ctx = e.getSource().getBindingContext();
+                    runAction("generateExceptionReport", ctx.getProperty("ID"), "Exception Report");
+                  }
+                }).addStyleClass("sapUiTinyMarginBegin")
+              ]
+            })
+          ]
+        })
+      }
+    });
+
+    var oTriggerBtn = new sap.m.Button({
+      text: "Trigger New Run",
+      type: sap.m.ButtonType.Emphasized,
+      icon: "sap-icon://play",
+      press: function() {
+        var oDialog = buildTriggerDialog(oModel.getProperty("/plants"));
+        oDialog.open();
+      }
+    });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Mass Balance Runs", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll }),
+            oTriggerBtn
+          ]
+        }),
+        oTable
+      ]
+    });
+  }
+
+  // ─── EXCEPTIONS TABLE ────────────────────────────────────────────────────
+  function buildExceptionsPage() {
+    var oTable = new sap.m.Table({
+      growing: true,
+      growingThreshold: 30,
+      noDataText: "No exceptions detected yet.",
+      columns: [
+        new sap.m.Column({ header: new sap.m.Label({ text: "Exception ID" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Severity" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Root Cause" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Variance MT" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Variance %" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Description" }) })
+      ],
+      items: {
+        path: "/exceptions",
+        template: new sap.m.ColumnListItem({
+          highlight: { path: "severity", formatter: function(s){ return statusState(s); } },
+          cells: [
+            new sap.m.Text({ text: "{exceptionId}" }),
+            new sap.m.ObjectStatus({
+              text: "{severity}",
+              state: { path: "severity", formatter: function(s){ return severityState(s); } }
+            }),
+            new sap.m.ObjectStatus({
+              text: "{rootCauseCategory}",
+              icon: {
+                path: "rootCauseCategory",
+                formatter: function(c) {
+                  return { MC:"sap-icon://measure", TX:"sap-icon://transaction",
+                           MD:"sap-icon://database", TF:"sap-icon://transfer",
+                           PL:"sap-icon://pipeline-analysis", SY:"sap-icon://system-exit" }[c] || "";
+                }
+              }
+            }),
+            new sap.m.Text({
+              text: { path: "varianceMT", formatter: function(v){ return v ? parseFloat(v).toFixed(3) + " MT" : "—"; } }
+            }),
+            new sap.m.Text({
+              text: { path: "variancePct", formatter: function(v){ return v ? (parseFloat(v)*100).toFixed(3) + " %" : "—"; } }
+            }),
+            new sap.m.ObjectStatus({
+              text: "{status}",
+              state: { path: "status", formatter: function(s){ return statusState(s); } }
+            }),
+            new sap.m.Text({ text: "{description}", wrapping: false })
+          ]
+        })
+      }
+    });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll }),
+            new sap.m.SegmentedButton({
+              selectionChange: function(e) {
+                var key = e.getParameter("item").getKey();
+                var aFilters = [];
+                if (key !== "ALL") {
+                  aFilters.push(new sap.ui.model.Filter("severity", sap.ui.model.FilterOperator.EQ, key));
+                }
+                oTable.getBinding("items").filter(aFilters);
+              },
+              items: [
+                new sap.m.SegmentedButtonItem({ key: "ALL",      text: "All" }),
+                new sap.m.SegmentedButtonItem({ key: "CRITICAL", text: "Critical" }),
+                new sap.m.SegmentedButtonItem({ key: "WARNING",  text: "Warning" }),
+                new sap.m.SegmentedButtonItem({ key: "ADVISORY", text: "Advisory" }),
+                new sap.m.SegmentedButtonItem({ key: "INFO",     text: "Info" })
+              ]
+            })
+          ]
+        }),
+        oTable
+      ]
+    });
+  }
+
+  // ─── APPROVALS TABLE ─────────────────────────────────────────────────────
+  function buildApprovalsPage() {
+    var oTable = new sap.m.Table({
+      growing: true,
+      growingThreshold: 30,
+      noDataText: "No pending approvals.",
+      columns: [
+        new sap.m.Column({ header: new sap.m.Label({ text: "Approval ID" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Type" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Priority" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Proposed Action" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Requested" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Actions" }) })
+      ],
+      items: {
+        path: "/approvals",
+        template: new sap.m.ColumnListItem({
+          highlight: {
+            path: "approvalStatus",
+            formatter: function(s){ return s === "PENDING" ? "Warning" : s === "APPROVED" ? "Success" : "Error"; }
+          },
+          cells: [
+            new sap.m.Text({ text: "{approvalId}" }),
+            new sap.m.Text({ text: "{approvalType}" }),
+            new sap.m.ObjectStatus({
+              text: "{priority}",
+              state: {
+                path: "priority",
+                formatter: function(p){ return {URGENT:"Error",HIGH:"Warning",MEDIUM:"Information",LOW:"None"}[p] || "None"; }
+              }
+            }),
+            new sap.m.ObjectStatus({
+              text: "{approvalStatus}",
+              state: {
+                path: "approvalStatus",
+                formatter: function(s){ return {APPROVED:"Success",REJECTED:"Error",PENDING:"Warning"}[s] || "None"; }
+              }
+            }),
+            new sap.m.Text({ text: "{proposedAction}", wrapping: false }),
+            new sap.m.Text({ text: { path: "requestedAt", formatter: function(d){ return d ? new Date(d).toLocaleDateString() : "—"; } } }),
+            new sap.m.HBox({
+              items: [
+                new sap.m.Button({
+                  text: "Approve",
+                  type: sap.m.ButtonType.Accept,
+                  visible: { path: "approvalStatus", formatter: function(s){ return s === "PENDING"; } },
+                  press: function(e) {
+                    var id = e.getSource().getBindingContext().getProperty("ID");
+                    sap.m.MessageBox.confirm("Approve this request?", {
+                      onClose: function(a) {
+                        if (a !== sap.m.MessageBox.Action.OK) return;
+                        odataPost(BASE + "/ApprovalRequests/" + id + "/approve", { comments: "Approved via UI" })
+                          .then(function(){ sap.m.MessageToast.show("Approved."); loadAll(); })
+                          .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
+                      }
+                    });
+                  }
+                }),
+                new sap.m.Button({
+                  text: "Reject",
+                  type: sap.m.ButtonType.Reject,
+                  visible: { path: "approvalStatus", formatter: function(s){ return s === "PENDING"; } },
+                  press: function(e) {
+                    var id = e.getSource().getBindingContext().getProperty("ID");
+                    sap.m.MessageBox.confirm("Reject this request?", {
+                      onClose: function(a) {
+                        if (a !== sap.m.MessageBox.Action.OK) return;
+                        odataPost(BASE + "/ApprovalRequests/" + id + "/reject", { comments: "Rejected via UI" })
+                          .then(function(){ sap.m.MessageToast.show("Rejected."); loadAll(); })
+                          .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
+                      }
+                    });
+                  }
+                }).addStyleClass("sapUiTinyMarginBegin")
+              ]
+            })
+          ]
+        })
+      }
+    });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Approval Requests", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.Text({ text: " (Human-in-the-Loop — no auto-corrections)" }).addStyleClass("sapUiSmallMarginBegin"),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll })
+          ]
+        }),
+        oTable
+      ]
+    });
+  }
+
+  // ─── CONFIG PAGE ─────────────────────────────────────────────────────────
+  function buildConfigPage() {
+    var oPlants = new sap.m.List({
+      headerText: "Refineries / Plants",
+      items: { path: "/plants", template: new sap.m.ObjectListItem({
+        title: "{plantCode}",
+        intro: "{country}",
+        attributes: [
+          new sap.m.ObjectAttribute({ title: "Name",     text: "{plantName}" }),
+          new sap.m.ObjectAttribute({ title: "Timezone", text: "{timezone}" })
+        ]
+      })}
+    });
+
+    var oMaterials = new sap.m.List({
+      headerText: "Hydrocarbon Materials",
+      items: { path: "/materials", template: new sap.m.ObjectListItem({
+        title: "{materialCode}",
+        intro: "{productGroup}",
+        attributes: [
+          new sap.m.ObjectAttribute({ title: "Description", text: "{description}" }),
+          new sap.m.ObjectAttribute({ title: "Base UOM",    text: "{baseUom}" }),
+          new sap.m.ObjectAttribute({ title: "Density",     text: { path: "densityFactor", formatter: function(d){ return d ? parseFloat(d).toFixed(4) + " MT/m³" : "—"; } } }),
+          new sap.m.ObjectAttribute({ title: "API Gravity", text: { path: "apiGravity", formatter: function(v){ return v ? parseFloat(v).toFixed(1) + " °API" : "—"; } } })
+        ]
+      })}
+    });
+
+    var oTolerance = new sap.m.Table({
+      headerText: "Tolerance Configuration",
+      columns: [
+        new sap.m.Column({ header: new sap.m.Label({ text: "Name" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Material Group" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "INFO %" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "ADVISORY %" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "WARNING %" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "CRITICAL %" }) })
+      ],
+      items: {
+        path: "/tolerances",
+        template: new sap.m.ColumnListItem({
+          cells: [
+            new sap.m.Text({ text: "{configName}" }),
+            new sap.m.Text({ text: "{materialGroup}" }),
+            new sap.m.ObjectStatus({ text: { path: "infoThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Information" }),
+            new sap.m.ObjectStatus({ text: { path: "advisoryThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Warning" }),
+            new sap.m.ObjectStatus({ text: { path: "warningThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Warning" }),
+            new sap.m.ObjectStatus({ text: { path: "criticalThresholdPct", formatter: function(v){ return v ? "> " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Error" })
+          ]
+        })
+      }
+    });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Reference Data & Configuration", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll })
+          ]
+        }),
+        new sap.m.FlexBox({
+          wrap: sap.m.FlexWrap.Wrap,
+          alignItems: sap.m.FlexAlignItems.Start,
+          items: [
+            new sap.m.VBox({ width: "340px", items: [oPlants] }).addStyleClass("sapUiSmallMarginEnd"),
+            new sap.m.VBox({ width: "460px", items: [oMaterials] }).addStyleClass("sapUiSmallMarginEnd"),
+            new sap.m.VBox({ width: "100%", items: [oTolerance] })
+          ]
+        })
+      ]
+    });
+  }
+
+  // ─── PIPELINE DIAGRAM (visual 10-step) ───────────────────────────────────
+  function buildAboutPage() {
+    var steps = [
+      { icon: "sap-icon://download-from-cloud", title: "1. Data Ingestion",      desc: "Collect TANK / MAT / MOV / PHYS / BOOK from SAP IS-Oil & sensors" },
+      { icon: "sap-icon://validate",             title: "2. Data Validation",     desc: "Completeness, referential integrity, consistency, period alignment" },
+      { icon: "sap-icon://simulate",             title: "3. Balance Calculation", desc: "Opening + Receipts − Issues − Consumption ± Transfers ± Adjustments" },
+      { icon: "sap-icon://synchronize",          title: "4. Reconciliation",      desc: "Aggregate at plant / tank / material level" },
+      { icon: "sap-icon://compare",              title: "5. Physical vs Book",    desc: "Compare dip-read physical stock vs SAP MARD book quantity" },
+      { icon: "sap-icon://alert",                title: "6. Tolerance Check",     desc: "Assign INFO / ADVISORY / WARNING / CRITICAL severity bands" },
+      { icon: "sap-icon://search",               title: "7. Investigation",       desc: "Autonomous root-cause analysis across all flagged variances" },
+      { icon: "sap-icon://tag",                  title: "8. Classification",      desc: "MC / TX / MD / TF / PL / SY root-cause categories" },
+      { icon: "sap-icon://document-text",        title: "9. Exception Report",    desc: "Evidence package + corrective recommendations" },
+      { icon: "sap-icon://manager-insight",      title: "10. Executive Summary",  desc: "Management KPI dashboard with period-over-period trends" }
+    ];
+
+    var oGrid = new sap.m.FlexBox({
+      wrap: sap.m.FlexWrap.Wrap,
+      justifyContent: sap.m.FlexJustifyContent.Start
+    });
+    steps.forEach(function(s) {
+      oGrid.addItem(
+        new sap.f.Card({
+          width: "280px",
+          header: new sap.f.cards.Header({ title: s.title, iconSrc: s.icon }),
+          content: new sap.m.VBox({
+            items: [ new sap.m.Text({ text: s.desc }).addStyleClass("sapUiTinyMarginBeginEnd sapUiTinyMarginBottom") ]
+          })
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+      );
+    });
+
+    var rootCauses = [
+      { code:"MC", label:"Measurement / Calibration", color:"#0070f2" },
+      { code:"TX", label:"Transaction Error",          color:"#e9730c" },
+      { code:"MD", label:"Master Data Issue",          color:"#e6a000" },
+      { code:"TF", label:"Transfer / Routing",         color:"#188918" },
+      { code:"PL", label:"Physical Loss / Gain",       color:"#bb0000" },
+      { code:"SY", label:"System / Interface",         color:"#6a6d70" }
+    ];
+    var oRootCauseBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
+    rootCauses.forEach(function(rc) {
+      oRootCauseBox.addItem(
+        new sap.m.GenericTag({
+          text: rc.code + " — " + rc.label,
+          status: "Information"
+        }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+      );
+    });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Agentic AI Pipeline — 10 Steps", level: sap.ui.core.TitleLevel.H2 })
+          ]
+        }),
+        new sap.m.Panel({
+          headerText: "Root Cause Categories (Slide 22)",
+          expandable: false,
+          content: oRootCauseBox
+        }).addStyleClass("sapUiSmallMarginBottom"),
+        oGrid
+      ]
+    });
+  }
+
+  // ─── MAIN APP SHELL ──────────────────────────────────────────────────────
+  var oIconTabBar = new sap.m.IconTabBar({
+    expandable: false,
+    stretchContentHeight: false,
+    items: [
+      new sap.m.IconTabFilter({
+        key: "dashboard",
+        icon: "sap-icon://home",
+        text: "Dashboard",
+        content: [
+          new sap.m.VBox({
+            items: [
+              buildKpiSection(),
+              new sap.m.Text({
+                text: "Mass Balance Runs — Recent",
+                wrapping: false
+              }).addStyleClass("section-header sapUiSmallMarginTop"),
+              buildRunsPage()
+            ]
+          }).setModel(oModel)
+        ]
+      }),
+      new sap.m.IconTabFilter({
+        key: "runs",
+        icon: "sap-icon://history",
+        text: "All Runs",
+        content: [ buildRunsPage().setModel(oModel) ]
+      }),
+      new sap.m.IconTabFilter({
+        key: "exceptions",
+        icon: "sap-icon://alert",
+        text: "Exceptions",
+        iconColor: sap.ui.core.IconColor.Negative,
+        content: [ buildExceptionsPage().setModel(oModel) ]
+      }),
+      new sap.m.IconTabFilter({
+        key: "approvals",
+        icon: "sap-icon://pending",
+        text: "Approvals",
+        iconColor: sap.ui.core.IconColor.Critical,
+        content: [ buildApprovalsPage().setModel(oModel) ]
+      }),
+      new sap.m.IconTabFilter({
+        key: "config",
+        icon: "sap-icon://settings",
+        text: "Configuration",
+        content: [ buildConfigPage().setModel(oModel) ]
+      }),
+      new sap.m.IconTabFilter({
+        key: "pipeline",
+        icon: "sap-icon://process",
+        text: "Pipeline",
+        content: [ buildAboutPage().setModel(oModel) ]
+      })
+    ]
+  }).setModel(oModel);
+
+  var oPage = new sap.m.Page({
+    title: "Refinery Mass Balance — Agentic AI",
+    showNavButton: false,
+    headerContent: [
+      new sap.m.Button({
+        icon: "sap-icon://refresh",
+        tooltip: "Refresh all data",
+        press: loadAll
+      }),
+      new sap.m.ObjectStatus({
+        text: "AI-Powered | 10-Step Pipeline | Human-in-the-Loop",
+        state: "Information"
+      }).addStyleClass("sapUiSmallMarginBegin")
+    ],
+    subHeader: new sap.m.Toolbar({
+      content: [
+        new sap.m.Label({ text: "Connected to: SAP CAP OData Service" }),
+        new sap.m.ToolbarSeparator(),
+        new sap.m.Label({ text: "Slide deck: SAP Refinery Mass Balance Reconciliation (Sept 2026)" }),
+        new sap.m.ToolbarSpacer(),
+        new sap.m.BusyIndicator({
+          visible: "{/busy}",
+          size: "0.75rem"
+        }).setModel(oModel)
+      ]
+    }),
+    content: [ oIconTabBar ]
+  });
+
+  var oApp = new sap.m.App({ pages: [ oPage ] });
+  oApp.setModel(oModel);
+  oApp.placeAt("content");
+
+  // ─── initial load ─────────────────────────────────────────────────────────
+  loadAll();
+});
+</script>
+</head>
+<body class="sapUiBody" id="body">
+  <div id="content"></div>
+</body>
+</html>

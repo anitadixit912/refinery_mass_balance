@@ -1,0 +1,4 @@
+ID,plantCode,plantName,country,region,isActive
+10000000-0000-0000-0000-000000000001,R001,Refinery Alpha,SAU,Middle East,true
+10000000-0000-0000-0000-000000000002,R002,Refinery Beta,NLD,Europe,true
+10000000-0000-0000-0000-000000000003,R003,Refinery Gamma,SGP,Asia Pacific,true
