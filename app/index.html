@@ -14,6 +14,9 @@
 </script>
 <style>
   .kpi-card { min-width: 180px; }
+  .kpi-clickable { cursor: pointer; }
+  .kpi-clickable:hover .sapMPanelHdr { background: #e8f1fb; }
+  .kpi-clickable:hover { box-shadow: inset 0 0 0 1px #0070f2; border-radius: 4px; }
   .severity-CRITICAL { color: #bb0000 !important; font-weight: bold; }
   .severity-WARNING  { color: #e9730c !important; font-weight: bold; }
   .severity-ADVISORY { color: #e6a000 !important; }
@@ -44,7 +47,10 @@ sap.ui.getCore().attachInit(function () {
 
   // ─── helpers ─────────────────────────────────────────────────────────────
   function odata(path) {
-    return fetch(path, { headers: { Accept: "application/json" } })
+    return fetch(path, {
+      headers: { Accept: "application/json" },
+      cache: "no-store"
+    })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if (d.error) throw new Error(d.error.message);
@@ -70,29 +76,23 @@ sap.ui.getCore().attachInit(function () {
       odata(ADMIN + "/Materials"),
       odata(ADMIN + "/ToleranceConfigs")
     ]).then(function(results) {
-      var runs   = results[0];
-      var excs   = results[1];
-      var apprs  = results[2];
-      var plants = results[3];
-      var mats   = results[4];
-      var tols   = results[5];
+      var runs  = results[0];
+      var excs  = results[1];
+      var apprs = results[2];
+      var lastRun = runs.length ? runs[0] : null;
 
-      var critCount = excs.filter(function(e){ return e.severity === "CRITICAL"; }).length;
-      var pendCount = apprs.filter(function(a){ return a.approvalStatus === "PENDING"; }).length;
-      var lastRun   = runs.length ? runs[0] : null;
-
-      oModel.setData({
-        runs: runs, exceptions: excs, approvals: apprs,
-        plants: plants, materials: mats, tolerances: tols,
-        kpi: {
-          totalRuns: runs.length,
-          criticalExceptions: critCount,
-          pendingApprovals: pendCount,
-          balanceStatus: lastRun ? lastRun.balanceStatus || "—" : "—"
-        },
-        selectedRunId: null,
-        busy: false
-      });
+      // setProperty per-path so bindings always re-evaluate
+      oModel.setProperty("/runs",       runs);
+      oModel.setProperty("/exceptions", excs);
+      oModel.setProperty("/approvals",  apprs);
+      oModel.setProperty("/plants",     results[3]);
+      oModel.setProperty("/materials",  results[4]);
+      oModel.setProperty("/tolerances", results[5]);
+      oModel.setProperty("/kpi/totalRuns",         runs.length);
+      oModel.setProperty("/kpi/criticalExceptions", excs.filter(function(e){ return e.severity === "CRITICAL"; }).length);
+      oModel.setProperty("/kpi/pendingApprovals",   apprs.filter(function(a){ return a.approvalStatus === "PENDING"; }).length);
+      oModel.setProperty("/kpi/balanceStatus",      lastRun ? lastRun.balanceStatus || "—" : "—");
+      oModel.setProperty("/busy", false);
     }).catch(function(e){
       oModel.setProperty("/busy", false);
       sap.m.MessageToast.show("Error loading data: " + e.message);
@@ -152,12 +152,21 @@ sap.ui.getCore().attachInit(function () {
           sap.m.MessageToast.show("Please select a Plant and Period."); return;
         }
         oTriggerDialog.setBusy(true);
-        odataPost(BASE + "/MassBalanceRuns/triggerRun", {
+        odataPost(BASE + "/triggerRun", {
           plantId: plantId, periodType: ptype, period: period, triggerType: "ON_DEMAND"
         }).then(function(result){
           oTriggerDialog.setBusy(false);
           oTriggerDialog.close();
-          sap.m.MessageToast.show("Run triggered: " + (result.runId || "created"));
+          if (result && result.error) {
+            sap.m.MessageBox.error("Trigger failed: " + result.error.message);
+            return;
+          }
+          sap.m.MessageBox.information(
+            "Run created successfully!\n\nRun ID: " + (result.runId || result.ID || "?") +
+            "\nStatus: " + (result.status || result.runStatus || "INITIATED") +
+            "\n\nNow go to the Pipeline tab to execute the 10 agentic steps.",
+            { title: "Run Triggered — AI Agent Ready" }
+          );
           loadAll();
         }).catch(function(e){
           oTriggerDialog.setBusy(false);
@@ -194,8 +203,48 @@ sap.ui.getCore().attachInit(function () {
   }
 
   // ─── PIPELINE ACTIONS ─────────────────────────────────────────────────────
+  function formatAgentResult(label, r) {
+    if (!r) return label + " completed (no result returned).";
+    var lines = ["AI Agent Result — " + label, "─────────────────────────────"];
+    var keyLabels = {
+      checksPassed:"Checks Passed", checksFailed:"Checks Failed", blockerCount:"Blockers",
+      linesProcessed:"Lines Processed", totalVarianceMT:"Total Variance (MT)", balanceStatus:"Balance Status",
+      plantLines:"Plant Lines", tankLines:"Tank Lines", materialLines:"Material Lines", exceptionsFound:"Exceptions Found",
+      infoCount:"INFO Count", advisoryCount:"ADVISORY Count", warningCount:"WARNING Count", criticalCount:"CRITICAL Count",
+      overallStatus:"Overall Status", exceptionsInvestigated:"Investigated", classified:"Classified",
+      pendingClassification:"Pending Classification", reportId:"Report ID", totalExceptions:"Total Exceptions",
+      approvalsPending:"Pending Approvals", dataCompleteness:"Data Completeness", tanksReconciled:"Tanks Reconciled",
+      refineryVariancePct:"Refinery Variance %", activeExceptions:"Active Exceptions",
+      correctionsPosted:"Corrections Posted", stepsCompleted:"Steps Completed", finalStatus:"Final Status",
+      requiresHumanAction:"Requires Human Action", message:"Message"
+    };
+    Object.keys(keyLabels).forEach(function(k) {
+      if (r[k] !== undefined && r[k] !== null) {
+        var v = r[k];
+        if (k === "dataCompleteness" || k === "refineryVariancePct") v = (parseFloat(v) * 100).toFixed(2) + "%";
+        if (k === "totalVarianceMT") v = parseFloat(v).toFixed(3) + " MT";
+        lines.push(keyLabels[k] + ": " + v);
+      }
+    });
+    if (r.issues && r.issues.length) {
+      lines.push("─────────────────────────────");
+      lines.push("Issues (" + r.issues.length + "):");
+      r.issues.slice(0, 5).forEach(function(i) {
+        lines.push("  [" + (i.severity||"?") + "] " + (i.checkName||"") + " — " + (i.issueDesc||""));
+      });
+      if (r.issues.length > 5) lines.push("  ... and " + (r.issues.length - 5) + " more");
+    }
+    if (r.rootCauseSummary && r.rootCauseSummary.length) {
+      lines.push("─────────────────────────────");
+      lines.push("Root Cause Summary:");
+      r.rootCauseSummary.forEach(function(rc) { lines.push("  " + rc.category + ": " + rc.count); });
+    }
+    return lines.join("\n");
+  }
+
   function runAction(path, runId, label) {
-    sap.m.MessageBox.confirm("Run " + label + " for this run?", {
+    sap.m.MessageBox.confirm("Run " + label + " for run ID:\n" + runId + "\n\nAI agents will execute this step.", {
+      title: "Confirm Pipeline Step",
       onClose: function(action) {
         if (action !== sap.m.MessageBox.Action.OK) return;
         oModel.setProperty("/busy", true);
@@ -205,7 +254,10 @@ sap.ui.getCore().attachInit(function () {
             if (r && r.error) {
               sap.m.MessageBox.error(label + " error: " + r.error.message);
             } else {
-              sap.m.MessageToast.show(label + " completed.");
+              sap.m.MessageBox.information(formatAgentResult(label, r), {
+                title: "Step Complete — " + label,
+                actions: [sap.m.MessageBox.Action.CLOSE]
+              });
               loadAll();
             }
           }).catch(function(e){
@@ -218,100 +270,50 @@ sap.ui.getCore().attachInit(function () {
 
   // ─── KPI TILES ───────────────────────────────────────────────────────────
   function buildKpiSection() {
-    function kpiTile(title, subtitle, icon, valuePath, stateExpr) {
-      return new sap.m.VBox({
-        width: "200px",
-        items: [
-          new sap.m.Panel({
-            expandable: false,
-            content: [
-              new sap.m.HBox({
-                alignItems: sap.m.FlexAlignItems.Center,
-                items: [
-                  new sap.ui.core.Icon({ src: icon, size: "1.5rem", color: "#0070f2" })
-                    .addStyleClass("sapUiSmallMarginEnd"),
-                  new sap.m.VBox({
-                    items: [
-                      new sap.m.Title({ text: title, level: sap.ui.core.TitleLevel.H5 }),
-                      new sap.m.Text({ text: subtitle }).addStyleClass("sapUiTinyMarginTop")
-                    ]
-                  })
-                ]
-              }).addStyleClass("sapUiSmallMarginBottom"),
-              new sap.m.ObjectStatus({
-                text: valuePath,
-                state: stateExpr
-              }).addStyleClass("sapMTitle")
+    function kpiPanel(title, subtitle, icon, iconColor, valuePath, stateBinding, tabKey) {
+      var oPanel = new sap.m.Panel({
+        expandable: false,
+        content: [
+          new sap.m.HBox({
+            alignItems: sap.m.FlexAlignItems.Center,
+            items: [
+              new sap.ui.core.Icon({ src: icon, size: "1.5rem", color: iconColor }).addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: title, level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: subtitle }).addStyleClass("sapUiTinyMarginTop")
+              ]})
             ]
-          })
+          }).addStyleClass("sapUiSmallMarginBottom"),
+          new sap.m.ObjectStatus(stateBinding).addStyleClass("sapMTitle"),
+          new sap.m.Text({ text: "tap to view →" }).addStyleClass("sapUiTinyMarginTop")
         ]
-      }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
+      });
+      oPanel.addStyleClass("kpi-clickable");
+      oPanel.attachBrowserEvent("click", function() { oIconTabBar.setSelectedKey(tabKey); });
+      return new sap.m.VBox({ width: "200px", items: [oPanel] })
+        .addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
     }
 
     return new sap.m.FlexBox({
       wrap: sap.m.FlexWrap.Wrap,
       justifyContent: sap.m.FlexJustifyContent.Start,
       items: [
-        new sap.m.VBox({ width: "200px", items: [
-          new sap.m.Panel({ expandable: false, content: [
-            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
-              new sap.ui.core.Icon({ src: "sap-icon://history", size: "1.5rem", color: "#0070f2" }).addStyleClass("sapUiSmallMarginEnd"),
-              new sap.m.VBox({ items: [
-                new sap.m.Title({ text: "Total Runs", level: sap.ui.core.TitleLevel.H5 }),
-                new sap.m.Text({ text: "All periods" }).addStyleClass("sapUiTinyMarginTop")
-              ]})
-            ]}).addStyleClass("sapUiSmallMarginBottom"),
-            new sap.m.Title({ text: "{/kpi/totalRuns}", level: sap.ui.core.TitleLevel.H2 })
-          ]})
-        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
-
-        new sap.m.VBox({ width: "200px", items: [
-          new sap.m.Panel({ expandable: false, content: [
-            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
-              new sap.ui.core.Icon({ src: "sap-icon://alert", size: "1.5rem", color: "#bb0000" }).addStyleClass("sapUiSmallMarginEnd"),
-              new sap.m.VBox({ items: [
-                new sap.m.Title({ text: "Critical Exceptions", level: sap.ui.core.TitleLevel.H5 }),
-                new sap.m.Text({ text: "Require action" }).addStyleClass("sapUiTinyMarginTop")
-              ]})
-            ]}).addStyleClass("sapUiSmallMarginBottom"),
-            new sap.m.ObjectStatus({
-              text: "{/kpi/criticalExceptions}",
-              state: "{= ${/kpi/criticalExceptions} > 0 ? 'Error' : 'Success' }"
-            }).addStyleClass("sapMTitle")
-          ]})
-        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
-
-        new sap.m.VBox({ width: "200px", items: [
-          new sap.m.Panel({ expandable: false, content: [
-            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
-              new sap.ui.core.Icon({ src: "sap-icon://pending", size: "1.5rem", color: "#e9730c" }).addStyleClass("sapUiSmallMarginEnd"),
-              new sap.m.VBox({ items: [
-                new sap.m.Title({ text: "Pending Approvals", level: sap.ui.core.TitleLevel.H5 }),
-                new sap.m.Text({ text: "Awaiting review" }).addStyleClass("sapUiTinyMarginTop")
-              ]})
-            ]}).addStyleClass("sapUiSmallMarginBottom"),
-            new sap.m.ObjectStatus({
-              text: "{/kpi/pendingApprovals}",
-              state: "{= ${/kpi/pendingApprovals} > 0 ? 'Warning' : 'Success' }"
-            }).addStyleClass("sapMTitle")
-          ]})
-        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom"),
-
-        new sap.m.VBox({ width: "200px", items: [
-          new sap.m.Panel({ expandable: false, content: [
-            new sap.m.HBox({ alignItems: sap.m.FlexAlignItems.Center, items: [
-              new sap.ui.core.Icon({ src: "sap-icon://status-in-process", size: "1.5rem", color: "#188918" }).addStyleClass("sapUiSmallMarginEnd"),
-              new sap.m.VBox({ items: [
-                new sap.m.Title({ text: "Last Balance", level: sap.ui.core.TitleLevel.H5 }),
-                new sap.m.Text({ text: "Most recent run" }).addStyleClass("sapUiTinyMarginTop")
-              ]})
-            ]}).addStyleClass("sapUiSmallMarginBottom"),
-            new sap.m.ObjectStatus({
-              text: "{/kpi/balanceStatus}",
-              state: { path: "/kpi/balanceStatus", formatter: function(s){ return statusState(s); } }
-            }).addStyleClass("sapMTitle")
-          ]})
-        ]}).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom")
+        kpiPanel("Total Runs", "All periods", "sap-icon://history", "#0070f2",
+          null,
+          { text: "{/kpi/totalRuns}", state: "Information" },
+          "runs"),
+        kpiPanel("Critical Exceptions", "Require action", "sap-icon://alert", "#bb0000",
+          null,
+          { text: "{/kpi/criticalExceptions}", state: "{= ${/kpi/criticalExceptions} > 0 ? 'Error' : 'Success' }" },
+          "exceptions"),
+        kpiPanel("Pending Approvals", "Awaiting review", "sap-icon://pending", "#e9730c",
+          null,
+          { text: "{/kpi/pendingApprovals}", state: "{= ${/kpi/pendingApprovals} > 0 ? 'Warning' : 'Success' }" },
+          "approvals"),
+        kpiPanel("Last Balance", "Most recent run", "sap-icon://status-in-process", "#188918",
+          null,
+          { text: "{/kpi/balanceStatus}", state: { path: "/kpi/balanceStatus", formatter: function(s){ return statusState(s); } } },
+          "runs")
       ]
     }).addStyleClass("sapUiSmallMarginTop sapUiSmallMarginBottom");
   }
@@ -363,28 +365,30 @@ sap.ui.getCore().attachInit(function () {
             new sap.m.HBox({
               items: [
                 new sap.m.Button({
-                  icon: "sap-icon://simulate",
-                  tooltip: "Run Full Pipeline",
-                  type: sap.m.ButtonType.Emphasized,
+                  icon: "sap-icon://validate",
+                  tooltip: "Validate Data (Step 02)",
+                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var ctx = e.getSource().getBindingContext();
-                    runAction("runFullPipeline", ctx.getProperty("ID"), "Full Pipeline");
+                    var id = e.getSource().data("id");
+                    if (id) runAction("validateData", id, "Validate Data");
                   }
                 }),
                 new sap.m.Button({
-                  icon: "sap-icon://validate",
-                  tooltip: "Validate Data",
+                  icon: "sap-icon://simulate",
+                  tooltip: "Calculate Balance (Step 03)",
+                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var ctx = e.getSource().getBindingContext();
-                    runAction("validateData", ctx.getProperty("ID"), "Validate Data");
+                    var id = e.getSource().data("id");
+                    if (id) runAction("calculateBalance", id, "Calculate Balance");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin"),
                 new sap.m.Button({
                   icon: "sap-icon://detail-view",
-                  tooltip: "Generate Report",
+                  tooltip: "Generate Exception Report (Step 07)",
+                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var ctx = e.getSource().getBindingContext();
-                    runAction("generateExceptionReport", ctx.getProperty("ID"), "Exception Report");
+                    var id = e.getSource().data("id");
+                    if (id) runAction("generateExceptionReport", id, "Exception Report");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin")
               ]
@@ -545,14 +549,22 @@ sap.ui.getCore().attachInit(function () {
                   text: "Approve",
                   type: sap.m.ButtonType.Accept,
                   visible: { path: "approvalStatus", formatter: function(s){ return s === "PENDING"; } },
+                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var id = e.getSource().getBindingContext().getProperty("ID");
+                    var id = e.getSource().data("id");
+                    if (!id) { sap.m.MessageToast.show("Could not get approval ID"); return; }
                     sap.m.MessageBox.confirm("Approve this request?", {
                       onClose: function(a) {
                         if (a !== sap.m.MessageBox.Action.OK) return;
                         odataPost(BASE + "/approve", { approvalId: id, comments: "Approved via UI" })
-                          .then(function(){ sap.m.MessageToast.show("Approved."); loadAll(); })
-                          .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
+                          .then(function(r){
+                            if (r && r.error) { sap.m.MessageBox.error("Error: " + r.error.message); return; }
+                            sap.m.MessageBox.information(
+                              "Approved!\n\nSAP Document: " + (r.sapDocNumber || "—") + "\n" + (r.message || ""),
+                              { title: "Approval Confirmed" }
+                            );
+                            loadAll();
+                          }).catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
                       }
                     });
                   }
@@ -561,14 +573,19 @@ sap.ui.getCore().attachInit(function () {
                   text: "Reject",
                   type: sap.m.ButtonType.Reject,
                   visible: { path: "approvalStatus", formatter: function(s){ return s === "PENDING"; } },
+                  customData: [new sap.ui.core.CustomData({ key: "id", value: "{ID}" })],
                   press: function(e) {
-                    var id = e.getSource().getBindingContext().getProperty("ID");
+                    var id = e.getSource().data("id");
+                    if (!id) { sap.m.MessageToast.show("Could not get approval ID"); return; }
                     sap.m.MessageBox.confirm("Reject this request?", {
                       onClose: function(a) {
                         if (a !== sap.m.MessageBox.Action.OK) return;
                         odataPost(BASE + "/rejectApproval", { approvalId: id, comments: "Rejected via UI" })
-                          .then(function(){ sap.m.MessageToast.show("Rejected."); loadAll(); })
-                          .catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
+                          .then(function(r){
+                            if (r && r.error) { sap.m.MessageBox.error("Error: " + r.error.message); return; }
+                            sap.m.MessageToast.show("Rejected. Exception returned to OPEN status.");
+                            loadAll();
+                          }).catch(function(e){ sap.m.MessageBox.error("Error: " + e.message); });
                       }
                     });
                   }
@@ -681,7 +698,7 @@ sap.ui.getCore().attachInit(function () {
       { action: "investigateAndClassify",   icon: "sap-icon://search",               num:"06", title: "Investigate & Classify", desc: "Root-cause: MC / TX / MD / TF / PL / SY (Slide 22)",              btnText: "Investigate" },
       { action: "generateExceptionReport",  icon: "sap-icon://document-text",        num:"07", title: "Exception Report",    desc: "Evidence package + corrective recommendations per exception",         btnText: "Report" },
       { action: "generateExecutiveSummary", icon: "sap-icon://manager-insight",      num:"08", title: "Executive Summary",   desc: "Management KPI dashboard with period-over-period trends",             btnText: "Summary" },
-      { action: "runFullPipeline",          icon: "sap-icon://process",              num:"★",  title: "Run Full Pipeline",   desc: "Execute all 10 steps end-to-end with human approval gates",           btnText: "Run All" }
+      { action: "runFullPipeline",          icon: "sap-icon://process",              num:"★",  title: "Run Full Pipeline",   desc: "Trigger a brand-new run and execute all 10 steps end-to-end (opens dialog)",  btnText: "New Run" }
     ];
 
     var ROOT_CAUSES = [
@@ -716,21 +733,17 @@ sap.ui.getCore().attachInit(function () {
         type: step.num === "★" ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
         icon: step.icon,
         press: function() {
-          var runId = oRunSel.getSelectedKey();
-          if (!runId) {
-            sap.m.MessageToast.show("Select a Run first from the dropdown above.");
+          // Step 01 and ★ both create new runs — open the trigger dialog
+          if (step.action === "triggerRun" || step.action === "runFullPipeline") {
+            openTriggerDialog();
             return;
           }
-          if (step.action === "triggerRun" || step.action === "runFullPipeline") {
-            sap.m.MessageBox.confirm("Execute: " + step.title + "?", {
-              onClose: function(a) {
-                if (a !== sap.m.MessageBox.Action.OK) return;
-                runAction(step.action, runId, step.title);
-              }
-            });
-          } else {
-            runAction(step.action, runId, step.title);
+          var runId = oRunSel.getSelectedKey();
+          if (!runId) {
+            sap.m.MessageToast.show("Select a Run from the dropdown above first.");
+            return;
           }
+          runAction(step.action, runId, step.title);
         }
       });
 
@@ -786,6 +799,12 @@ sap.ui.getCore().attachInit(function () {
             new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh runs", press: loadAll })
           ]
         }),
+        new sap.m.MessageStrip({
+          text: "AI Agents: ValidationAnomalyAgent (Step 02) → CalculationReconciliationAgent (Steps 03–06) → ExceptionManagementAgent (Steps 07–08) → ReportGenerationAgent (Steps 09–10). Select a Run and click each step to see the AI agent output.",
+          type: sap.ui.core.MessageType.Information,
+          showIcon: true,
+          showCloseButton: true
+        }).addStyleClass("sapUiSmallMarginBottom"),
         new sap.m.Panel({
           headerText: "Select Run to Execute Steps",
           expandable: false,
