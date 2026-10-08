@@ -106,11 +106,8 @@ sap.ui.getCore().attachInit(function () {
              COMPLETED:"Success", FAILED:"Error", IN_PROGRESS:"Warning" }[s] || "None";
   }
 
-  // ─── TRIGGER DIALOG (singleton — created once, reused for both tab buttons) ──
-  var oPlantSel = new sap.m.Select({
-    width: "100%",
-    forceSelection: false
-  });
+  // ─── TRIGGER DIALOG ──────────────────────────────────────────────────────
+  var oPlantSel = new sap.m.Select({ width: "100%", forceSelection: false });
 
   var oPeriodType = new sap.m.Select({
     width: "100%",
@@ -128,17 +125,6 @@ sap.ui.getCore().attachInit(function () {
   var oTriggerDialog = new sap.m.Dialog({
     title: "Trigger New Mass Balance Run",
     icon: "sap-icon://play",
-    beforeOpen: function() {
-      // repopulate plant items each time dialog opens — dialog is outside the view tree
-      oPlantSel.destroyItems();
-      var plants = oModel.getProperty("/plants") || [];
-      plants.forEach(function(p) {
-        oPlantSel.addItem(new sap.ui.core.ListItem({
-          key: p.ID,
-          text: p.plantCode + " – " + p.plantName
-        }));
-      });
-    },
     content: [
       new sap.ui.layout.form.SimpleForm({
         layout: sap.ui.layout.form.SimpleFormLayout.ResponsiveGridLayout,
@@ -181,6 +167,28 @@ sap.ui.getCore().attachInit(function () {
       press: function(){ oTriggerDialog.close(); }
     })
   });
+
+  // Fetch plants fresh, populate select, THEN open — avoids async timing issues
+  function openTriggerDialog() {
+    oTriggerDialog.setBusy(true);
+    oTriggerDialog.open();
+    fetch(ADMIN + "/Plants", { headers: { Accept: "application/json" } })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        oPlantSel.destroyItems();
+        (d.value || []).forEach(function(p) {
+          oPlantSel.addItem(new sap.ui.core.ListItem({
+            key:  p.ID,
+            text: p.plantCode + " – " + p.plantName
+          }));
+        });
+        oTriggerDialog.setBusy(false);
+      })
+      .catch(function(e) {
+        oTriggerDialog.setBusy(false);
+        sap.m.MessageToast.show("Could not load plants: " + e.message);
+      });
+  }
 
   // ─── PIPELINE ACTIONS ─────────────────────────────────────────────────────
   function runAction(path, runId, label) {
@@ -383,8 +391,7 @@ sap.ui.getCore().attachInit(function () {
       text: "Trigger New Run",
       type: sap.m.ButtonType.Emphasized,
       icon: "sap-icon://play",
-      press: function() { oTriggerDialog.open(); }
-    });
+      press: function() { openTriggerDialog(); }    });
 
     return new sap.m.VBox({
       items: [
@@ -785,8 +792,7 @@ sap.ui.getCore().attachInit(function () {
                   text: "Trigger New Run",
                   type: sap.m.ButtonType.Emphasized,
                   icon: "sap-icon://play",
-                  press: function() { oTriggerDialog.open(); }
-                }).addStyleClass("sapUiSmallMarginBegin")
+                  press: function() { openTriggerDialog(); }                }).addStyleClass("sapUiSmallMarginBegin")
               ]
             })
           ]
