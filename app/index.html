@@ -109,17 +109,7 @@ sap.ui.getCore().attachInit(function () {
   // ─── TRIGGER DIALOG (singleton — created once, reused for both tab buttons) ──
   var oPlantSel = new sap.m.Select({
     width: "100%",
-    forceSelection: false,
-    items: {
-      path: "/plants",
-      template: new sap.ui.core.ListItem({
-        key: "{ID}",
-        text: {
-          parts: ["plantCode", "plantName"],
-          formatter: function(c, n){ return c + " – " + n; }
-        }
-      })
-    }
+    forceSelection: false
   });
 
   var oPeriodType = new sap.m.Select({
@@ -138,6 +128,17 @@ sap.ui.getCore().attachInit(function () {
   var oTriggerDialog = new sap.m.Dialog({
     title: "Trigger New Mass Balance Run",
     icon: "sap-icon://play",
+    beforeOpen: function() {
+      // repopulate plant items each time dialog opens — dialog is outside the view tree
+      oPlantSel.destroyItems();
+      var plants = oModel.getProperty("/plants") || [];
+      plants.forEach(function(p) {
+        oPlantSel.addItem(new sap.ui.core.ListItem({
+          key: p.ID,
+          text: p.plantCode + " – " + p.plantName
+        }));
+      });
+    },
     content: [
       new sap.ui.layout.form.SimpleForm({
         layout: sap.ui.layout.form.SimpleFormLayout.ResponsiveGridLayout,
@@ -180,7 +181,6 @@ sap.ui.getCore().attachInit(function () {
       press: function(){ oTriggerDialog.close(); }
     })
   });
-  oTriggerDialog.setModel(oModel);
 
   // ─── PIPELINE ACTIONS ─────────────────────────────────────────────────────
   function runAction(path, runId, label) {
