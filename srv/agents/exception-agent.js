@@ -135,7 +135,7 @@ class ExceptionManagementAgent {
                     periodType         : run.periodType,
                     varianceMT         : line.variance,
                     variancePct        : line.variancePct,
-                    varianceSign       : (line.variance || 0) >= 0 ? 'EXCESS' : 'SHORTAGE',
+                    varianceSign       : (Number(line.variance) || 0) >= 0 ? 'EXCESS' : 'SHORTAGE',
                     severity           : line.severity,
                     rootCauseCategory  : null,   // filled in classifyRootCauses
                     rootCauseNarrative : null,
@@ -309,7 +309,7 @@ Be specific and technical. Reference the actual numbers provided.`;
   Closing Book: ${line.closingBook} MT  Closing Physical: ${line.closingPhysical} MT
   Movement docs found : ${movements.length}
   Physical inventory  : ${physInv ? `dip=${physInv.dipReading}, temp=${physInv.temperature}°C, density=${physInv.density} kg/L` : 'none'}
-  Pipeline movements  : ${pipelineMovements.length} (${pipelineMovements.reduce((s, m) => s + (m.quantityMT || 0), 0).toFixed(3)} MT)
+  Pipeline movements  : ${pipelineMovements.length} (${pipelineMovements.reduce((s, m) => s + (Number(m.quantityMT) || 0), 0).toFixed(3)} MT)
   Material density    : ${material?.density ?? 'N/A'} kg/L   UoM: ${material?.baseUom ?? 'N/A'}
 
 Write the 5-step investigation log.`;
@@ -324,7 +324,7 @@ Write the 5-step investigation log.`;
                 physInv
                     ? `[3] Physical reading: dip=${physInv.dipReading}, temp=${physInv.temperature}°C, density=${physInv.density} kg/L, waterBottom=${physInv.waterBottom} MT`
                     : `[3] No physical inventory reading found for this tank/period — completeness gap`,
-                `[4] Pipeline meter check: ${pipelineMovements.length} movements, total metered=${pipelineMovements.reduce((s, m) => s + (m.quantityMT || 0), 0).toFixed(3)} MT`,
+                `[4] Pipeline meter check: ${pipelineMovements.length} movements, total metered=${pipelineMovements.reduce((s, m) => s + (Number(m.quantityMT) || 0), 0).toFixed(3)} MT`,
                 `[5] Master data: density=${material?.density ?? 'N/A'} kg/L, UoM=${material?.baseUom ?? 'N/A'}, group=${material?.productGroup ?? 'N/A'}`,
             ].join('\n');
         }
@@ -340,8 +340,8 @@ Write the 5-step investigation log.`;
     //  HEURISTIC FALLBACK (used when LLM is unavailable)
     // ─────────────────────────────────────────────────────────────────
     _classifyRootCauseHeuristic(exception, line) {
-        const absVariancePct = Math.abs(exception.variancePct || 0);
-        const absVarianceMT  = Math.abs(exception.varianceMT  || 0);
+        const absVariancePct = Math.abs(Number(exception.variancePct) || 0);
+        const absVarianceMT  = Math.abs(Number(exception.varianceMT)  || 0);
 
         // Heuristic rules (ordered by specificity)
         if (line?.isDuplicate) {

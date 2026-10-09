@@ -138,8 +138,8 @@ class ReportGenerationAgent {
         const tanksReconciled = lines.filter(l => l.severity === 'INFO').length;
 
         // KPI: Refinery Variance (%) — weighted average across all lines
-        const totalClosingBook = lines.reduce((s, l) => s + (l.closingBook || 0), 0);
-        const totalVariance    = lines.reduce((s, l) => s + (l.variance    || 0), 0);
+        const totalClosingBook = lines.reduce((s, l) => s + (Number(l.closingBook) || 0), 0);
+        const totalVariance    = lines.reduce((s, l) => s + (Number(l.variance)    || 0), 0);
         const refineryVariancePct = totalClosingBook > 0
             ? parseFloat((totalVariance / totalClosingBook * 100).toFixed(4))
             : 0;

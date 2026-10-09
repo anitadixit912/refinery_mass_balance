@@ -150,7 +150,7 @@ class CalculationReconciliationAgent {
         );
 
         // Plant-level summary
-        const plantVariance = lines.reduce((sum, l) => sum + (l.variance || 0), 0);
+        const plantVariance = lines.reduce((sum, l) => sum + (Number(l.variance) || 0), 0);
 
         await this._log(run, 'STEP_04_RECONCILE',
             `Reconciled ${lines.length} balance lines across plant/tank/material levels. ` +
@@ -173,7 +173,7 @@ class CalculationReconciliationAgent {
         );
 
         // Identify lines with non-zero variance
-        const withVariance = lines.filter(l => Math.abs(l.variance || 0) > 0.001);
+        const withVariance = lines.filter(l => Math.abs(Number(l.variance) || 0) > 0.001);
 
         await this._log(run, 'STEP_05_COMPARE',
             `Physical vs Book comparison: ${lines.length} total, ` +
