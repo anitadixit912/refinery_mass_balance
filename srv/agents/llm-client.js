@@ -56,32 +56,66 @@ class LLMClient {
     }
 
     // ─── SAP AI Core ──────────────────────────────────────────────────
+    // AICORE_API_FORMAT=openai   → /chat/completions (gpt-4o, gpt-4.1, …)
+    // AICORE_API_FORMAT=bedrock  → /invoke with Bedrock format (claude via AI Core)
+    // AICORE_API_FORMAT=anthropic→ /messages with Anthropic format (legacy)
     async _callAICore(systemPrompt, userPrompt, maxTokens) {
         const token    = await this._getAICoreToken();
         const apiUrl   = process.env.AICORE_API_URL.replace(/\/$/, '');
         const deplId   = process.env.AICORE_DEPLOYMENT_ID;
         const resGroup = process.env.AICORE_RESOURCE_GROUP || 'default';
+        const fmt      = (process.env.AICORE_API_FORMAT || 'openai').toLowerCase();
 
-        const response = await fetch(
-            `${apiUrl}/v2/inference/deployments/${deplId}/chat/completions`,
-            {
-                method : 'POST',
-                headers: {
-                    'Authorization'    : `Bearer ${token}`,
-                    'AI-Resource-Group': resGroup,
-                    'Content-Type'     : 'application/json',
-                },
+        const headers = {
+            'Authorization'    : `Bearer ${token}`,
+            'AI-Resource-Group': resGroup,
+            'Content-Type'     : 'application/json',
+        };
+        const base = `${apiUrl}/v2/inference/deployments/${deplId}`;
+
+        if (fmt === 'bedrock') {
+            const response = await fetch(`${base}/invoke`, {
+                method: 'POST', headers,
                 body: JSON.stringify({
-                    messages  : [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user',   content: userPrompt   },
-                    ],
+                    anthropic_version: 'bedrock-2023-05-31',
                     max_tokens: maxTokens,
                     temperature: 0.3,
+                    system  : systemPrompt,
+                    messages: [{ role: 'user', content: userPrompt }],
                 }),
-            }
-        );
+            });
+            const data = await response.json();
+            if (data.error) throw new Error(`AI Core: ${JSON.stringify(data.error)}`);
+            return data.content[0].text;
+        }
 
+        if (fmt === 'anthropic') {
+            const response = await fetch(`${base}/messages`, {
+                method: 'POST', headers,
+                body: JSON.stringify({
+                    max_tokens: maxTokens,
+                    temperature: 0.3,
+                    system  : systemPrompt,
+                    messages: [{ role: 'user', content: userPrompt }],
+                }),
+            });
+            const data = await response.json();
+            if (data.error) throw new Error(`AI Core: ${JSON.stringify(data.error)}`);
+            return data.content[0].text;
+        }
+
+        // Default: OpenAI-compatible chat/completions (gpt-4o, gpt-4.1, …)
+        const response = await fetch(`${base}/chat/completions`, {
+            method: 'POST', headers,
+            body: JSON.stringify({
+                messages  : [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user',   content: userPrompt   },
+                ],
+                max_tokens : maxTokens,
+                temperature: 0.3,
+            }),
+        });
         const data = await response.json();
         if (data.error) throw new Error(`AI Core: ${JSON.stringify(data.error)}`);
         return data.choices[0].message.content;
