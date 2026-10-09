@@ -369,7 +369,10 @@ sap.ui.getCore().attachInit(function () {
         ]
       });
       oPanel.addStyleClass("kpi-clickable");
-      oPanel.attachBrowserEvent("click", function() { oIconTabBar.setSelectedKey(tabKey); });
+      oPanel.attachBrowserEvent("click", function() {
+        if (tabKey === "exceptions") { _exceptionsRunFilter = null; loadAll(); }
+        oIconTabBar.setSelectedKey(tabKey);
+      });
       return new sap.m.VBox({ width: "200px", items: [oPanel] })
         .addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
     }
