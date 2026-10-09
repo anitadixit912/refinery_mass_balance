@@ -42,12 +42,23 @@ sap.ui.getCore().attachInit(function () {
   var ADMIN  = "/api/admin";
 
   var _stepPanels = {}; // action → { panel, btn, press } — populated by makeStepCard
-  var _exceptionsRunFilter      = null; // run UUID filter; null = show all
-  var _exceptionsSeverityFilter = null; // severity filter; null = show all
+  var _exceptionsRunFilter        = null; // run UUID filter; null = show all
+  var _exceptionsSeverityFilter   = null; // severity filter; null = show all
+  var _exceptionsRootCauseFilter  = null; // root cause code filter; null = show all
   var _oExcRunFilterBar  = null;  // InfoToolbar shown when a run filter is active
   var _oExcRunFilterText = null;  // Text control inside that bar
   var _oExcSeverityBtn   = null;  // SegmentedButton for severity filter
   var _oExceptionsTable  = null;  // The exceptions sap.m.Table
+  var _rcToggleBtns      = {};    // code → sap.m.ToggleButton for root cause chips
+
+  var RC_DEFS = [
+    { code:"MC", label:"Measurement / Calibration", color:"#e9730c" },
+    { code:"TX", label:"Transaction Error",          color:"#d20a0a" },
+    { code:"MD", label:"Master Data Issue",          color:"#0070f2" },
+    { code:"TF", label:"Transfer / Routing",         color:"#188918" },
+    { code:"PL", label:"Physical Loss / Gain",       color:"#6a1c8a" },
+    { code:"SY", label:"System / Interface",         color:"#696969" }
+  ];
 
   function _applyExcFilters() {
     if (!_oExceptionsTable) return;
@@ -55,10 +66,17 @@ sap.ui.getCore().attachInit(function () {
     if (_exceptionsSeverityFilter) {
       filters.push(new sap.ui.model.Filter("severity", sap.ui.model.FilterOperator.EQ, _exceptionsSeverityFilter));
     }
+    if (_exceptionsRootCauseFilter) {
+      filters.push(new sap.ui.model.Filter("rootCauseCategory", sap.ui.model.FilterOperator.EQ, _exceptionsRootCauseFilter));
+    }
     _oExceptionsTable.getBinding("items").filter(filters);
     if (_oExcSeverityBtn) {
       _oExcSeverityBtn.setSelectedKey(_exceptionsSeverityFilter || "ALL");
     }
+    // sync toggle button pressed states
+    Object.keys(_rcToggleBtns).forEach(function(code) {
+      _rcToggleBtns[code].setPressed(_exceptionsRootCauseFilter === code);
+    });
   }
 
   var oModel = new sap.ui.model.json.JSONModel({
@@ -681,6 +699,42 @@ sap.ui.getCore().attachInit(function () {
           ]
         }),
         _oExcRunFilterBar,
+        (function() {
+          var oRcFlexBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
+          RC_DEFS.forEach(function(rc) {
+            var oBtn = new sap.m.ToggleButton({
+              text: rc.code + "  " + rc.label,
+              pressed: false,
+              press: function(e) {
+                var pressed = e.getSource().getPressed();
+                _exceptionsRootCauseFilter = pressed ? rc.code : null;
+                _applyExcFilters();
+              }
+            });
+            oBtn.addStyleClass("sapUiTinyMarginEnd sapUiTinyMarginBottom");
+            _rcToggleBtns[rc.code] = oBtn;
+            oRcFlexBox.addItem(oBtn);
+          });
+          var oClearBtn = new sap.m.Button({
+            text: "Clear filter",
+            icon: "sap-icon://clear-filter",
+            press: function() {
+              _exceptionsRootCauseFilter = null;
+              _applyExcFilters();
+            }
+          }).addStyleClass("sapUiTinyMarginEnd");
+          return new sap.m.Panel({
+            headerText: "Filter by Root Cause",
+            expandable: true,
+            expanded: false,
+            content: [ new sap.m.VBox({ items: [
+              new sap.m.Text({ text: "Click a category to filter the exceptions list. Click again to clear." })
+                .addStyleClass("sapUiTinyMarginBottom"),
+              oRcFlexBox,
+              oClearBtn
+            ]})]
+          }).addStyleClass("sapUiSmallMarginBottom");
+        })(),
         _oExceptionsTable
       ]
     });
@@ -931,22 +985,6 @@ sap.ui.getCore().attachInit(function () {
       makeStepCard("★",  "sap-icon://process",             "Run Full Pipeline",   "Trigger a new run and execute all steps end-to-end",         "runFullPipeline",         "New Run",     true)
     ]});
 
-    var rcDefs = [
-      { code:"MC", label:"Measurement / Calibration", color:"#e9730c" },
-      { code:"TX", label:"Transaction Error",          color:"#d20a0a" },
-      { code:"MD", label:"Master Data Issue",          color:"#0070f2" },
-      { code:"TF", label:"Transfer / Routing",         color:"#188918" },
-      { code:"PL", label:"Physical Loss / Gain",       color:"#6a1c8a" },
-      { code:"SY", label:"System / Interface",         color:"#696969" }
-    ];
-    var oRcBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap });
-    rcDefs.forEach(function(rc) {
-      oRcBox.addItem(new sap.ui.core.HTML({
-        content: '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;margin:4px 6px 4px 0;border-radius:14px;background:' + rc.color + ';color:#fff;font-size:0.8125rem;font-family:inherit;white-space:nowrap;pointer-events:none;user-select:none;">' +
-          '<strong>' + rc.code + '</strong>&nbsp;' + rc.label + '</span>'
-      }));
-    });
-
     return new sap.m.VBox({ items: [
       new sap.m.Toolbar({ content: [
         new sap.m.Title({ text: "Agentic Pipeline — Step-by-Step Execution", level: sap.ui.core.TitleLevel.H2 }),
@@ -963,8 +1001,6 @@ sap.ui.getCore().attachInit(function () {
           }).addStyleClass("sapUiSmallMarginBegin")
         ]})
       ]}).addStyleClass("sapUiSmallMarginBottom"),
-      new sap.m.Panel({ headerText: "Root Cause Categories (Slide 22)", expandable: false, content: [ oRcBox ] })
-        .addStyleClass("sapUiSmallMarginBottom"),
       oStepBox
     ]});
   }
