@@ -510,19 +510,40 @@ sap.ui.getCore().attachInit(function () {
                 new sap.m.Button({
                   icon: "sap-icon://detail-view",
                   tooltip: "Generate Exception Report (Step 07)",
-                  enabled: {
-                    path: "runStatus",
-                    formatter: function(s) {
-                      return ["INVESTIGATING","CHECKING_TOL","REPORTING","PENDING_APPR","COMPLETED"].indexOf(s) !== -1;
-                    }
-                  },
                   press: function(e) {
                     var ctx = e.getSource().getBindingContext();
-                    var id = ctx ? ctx.getProperty("ID") : null;
+                    var id     = ctx ? ctx.getProperty("ID")        : null;
+                    var status = ctx ? ctx.getProperty("runStatus")  : null;
+                    var runId  = ctx ? ctx.getProperty("runId")      : null;
                     if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    var readyStatuses = ["INVESTIGATING","CHECKING_TOL","REPORTING","PENDING_APPR","COMPLETED"];
+                    if (readyStatuses.indexOf(status) === -1) {
+                      sap.m.MessageBox.warning(
+                        "Exception report cannot be generated for this run.\n\n" +
+                        "Run: " + (runId || id) + "\n" +
+                        "Status: " + (status || "Unknown") + "\n\n" +
+                        "The exception report requires that Step 06 — Investigate & Classify " +
+                        "has completed successfully first.\n\n" +
+                        (status === "FAILED"
+                          ? "This run failed during an earlier step. Please trigger a new run, " +
+                            "ensure all data is available, and re-run the full pipeline."
+                          : "Complete the earlier pipeline steps (up to Step 06) before generating the report."),
+                        { title: "Run Not Ready — Cannot Generate Report" }
+                      );
+                      return;
+                    }
                     runAction("generateExceptionReport", id, "Exception Report");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin"),
+                new sap.m.Text({
+                  text: "⚠ Failed run — run Step 06 first",
+                  visible: {
+                    path: "runStatus",
+                    formatter: function(s) {
+                      return ["FAILED","INITIATED","VALIDATING","CALCULATING"].indexOf(s) !== -1;
+                    }
+                  }
+                }).addStyleClass("sapUiTinyMarginBegin").addStyleClass("sapUiSmallText"),
                 new sap.m.Button({
                   icon: "sap-icon://exception",
                   tooltip: "View Exceptions for this run",
