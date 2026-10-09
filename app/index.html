@@ -128,17 +128,26 @@ sap.ui.getCore().attachInit(function () {
       }
       _applyExcFilters();
 
-      // Imperatively populate the Pipeline run selector so keys are guaranteed correct
+      // Imperatively populate the Pipeline run selector — non-FAILED runs first
       if (oPipelineRunSel) {
         var prevKey = oPipelineRunSel.getSelectedKey();
         oPipelineRunSel.destroyItems();
-        runs.forEach(function(r) {
+        var failedStatuses = ["FAILED","CALCULATING","VALIDATING","INITIATED"];
+        var sortedRuns = runs.slice().sort(function(a, b) {
+          var aFailed = failedStatuses.indexOf(a.runStatus) !== -1 ? 1 : 0;
+          var bFailed = failedStatuses.indexOf(b.runStatus) !== -1 ? 1 : 0;
+          return aFailed - bFailed;
+        });
+        sortedRuns.forEach(function(r) {
+          var isFailed = failedStatuses.indexOf(r.runStatus) !== -1;
           oPipelineRunSel.addItem(new sap.ui.core.ListItem({
             key:  r.ID,
-            text: (r.runId || r.ID.slice(0,8)) + " | " + (r.period || "?") + " | " + (r.runStatus || "?")
+            text: (isFailed ? "⚠ " : "✓ ") +
+                  (r.runId || r.ID.slice(0,8)) + " | " + (r.period || "?") + " | " + (r.runStatus || "?")
           }));
         });
         if (prevKey) oPipelineRunSel.setSelectedKey(prevKey);
+        else if (sortedRuns.length) oPipelineRunSel.setSelectedKey(sortedRuns[0].ID);
       }
 
       oModel.setProperty("/busy", false);
@@ -256,6 +265,17 @@ sap.ui.getCore().attachInit(function () {
   function formatAgentResult(label, r) {
     if (!r) return label + " completed (no result returned).";
     var lines = ["AI Agent Result — " + label, "─────────────────────────────"];
+
+    // Guard: exception report with 0 exceptions means step 06 was skipped or run FAILED
+    if (label === "Exception Report" && r.totalExceptions === 0) {
+      lines.push("⚠  No exceptions found for this run.");
+      lines.push("   Possible causes:");
+      lines.push("   • Step 06 (Investigate & Classify) was not run yet");
+      lines.push("   • This run is in FAILED status — choose a completed run");
+      lines.push("   Select the correct active run from the dropdown and run");
+      lines.push("   Step 06 first, then re-run Exception Report.");
+      lines.push("─────────────────────────────");
+    }
     var keyLabels = {
       checksPassed:"Checks Passed", checksFailed:"Checks Failed", blockerCount:"Blockers",
       linesProcessed:"Lines Processed", totalVarianceMT:"Total Variance (MT)", balanceStatus:"Balance Status",
@@ -490,6 +510,12 @@ sap.ui.getCore().attachInit(function () {
                 new sap.m.Button({
                   icon: "sap-icon://detail-view",
                   tooltip: "Generate Exception Report (Step 07)",
+                  enabled: {
+                    path: "runStatus",
+                    formatter: function(s) {
+                      return ["INVESTIGATING","CHECKING_TOL","REPORTING","PENDING_APPR","COMPLETED"].indexOf(s) !== -1;
+                    }
+                  },
                   press: function(e) {
                     var ctx = e.getSource().getBindingContext();
                     var id = ctx ? ctx.getProperty("ID") : null;
