@@ -42,9 +42,24 @@ sap.ui.getCore().attachInit(function () {
   var ADMIN  = "/api/admin";
 
   var _stepPanels = {}; // action → { panel, btn, press } — populated by makeStepCard
-  var _exceptionsRunFilter = null; // UUID of run to filter exceptions by; null = show all
+  var _exceptionsRunFilter      = null; // run UUID filter; null = show all
+  var _exceptionsSeverityFilter = null; // severity filter; null = show all
   var _oExcRunFilterBar  = null;  // InfoToolbar shown when a run filter is active
   var _oExcRunFilterText = null;  // Text control inside that bar
+  var _oExcSeverityBtn   = null;  // SegmentedButton for severity filter
+  var _oExceptionsTable  = null;  // The exceptions sap.m.Table
+
+  function _applyExcFilters() {
+    if (!_oExceptionsTable) return;
+    var filters = [];
+    if (_exceptionsSeverityFilter) {
+      filters.push(new sap.ui.model.Filter("severity", sap.ui.model.FilterOperator.EQ, _exceptionsSeverityFilter));
+    }
+    _oExceptionsTable.getBinding("items").filter(filters);
+    if (_oExcSeverityBtn) {
+      _oExcSeverityBtn.setSelectedKey(_exceptionsSeverityFilter || "ALL");
+    }
+  }
 
   var oModel = new sap.ui.model.json.JSONModel({
     runs: [], exceptions: [], approvals: [], plants: [], materials: [], tolerances: [],
@@ -111,6 +126,7 @@ sap.ui.getCore().attachInit(function () {
           _oExcRunFilterText.setText("Showing exceptions for: " + (filteredRun ? filteredRun.runId : _exceptionsRunFilter));
         }
       }
+      _applyExcFilters();
 
       // Imperatively populate the Pipeline run selector so keys are guaranteed correct
       if (oPipelineRunSel) {
@@ -370,7 +386,11 @@ sap.ui.getCore().attachInit(function () {
       });
       oPanel.addStyleClass("kpi-clickable");
       oPanel.attachBrowserEvent("click", function() {
-        if (tabKey === "exceptions") { _exceptionsRunFilter = null; loadAll(); }
+        if (tabKey === "exceptions") {
+          _exceptionsRunFilter = null;
+          _exceptionsSeverityFilter = (title === "Critical Exceptions") ? "CRITICAL" : null;
+          loadAll();
+        }
         oIconTabBar.setSelectedKey(tabKey);
       });
       return new sap.m.VBox({ width: "200px", items: [oPanel] })
@@ -519,7 +539,7 @@ sap.ui.getCore().attachInit(function () {
 
   // ─── EXCEPTIONS TABLE ────────────────────────────────────────────────────
   function buildExceptionsPage() {
-    var oTable = new sap.m.Table({
+    _oExceptionsTable = new sap.m.Table({
       growing: true,
       growingThreshold: 30,
       noDataText: "No exceptions detected yet.",
@@ -588,21 +608,11 @@ sap.ui.getCore().attachInit(function () {
       ]
     });
 
-    return new sap.m.VBox({
-      items: [
-        new sap.m.Toolbar({
-          content: [
-            new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H2 }),
-            new sap.m.ToolbarSpacer(),
-            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll }),
-            new sap.m.SegmentedButton({
+    _oExcSeverityBtn = new sap.m.SegmentedButton({
               selectionChange: function(e) {
                 var key = e.getParameter("item").getKey();
-                var aFilters = [];
-                if (key !== "ALL") {
-                  aFilters.push(new sap.ui.model.Filter("severity", sap.ui.model.FilterOperator.EQ, key));
-                }
-                oTable.getBinding("items").filter(aFilters);
+                _exceptionsSeverityFilter = (key !== "ALL") ? key : null;
+                _applyExcFilters();
               },
               items: [
                 new sap.m.SegmentedButtonItem({ key: "ALL",      text: "All" }),
@@ -611,11 +621,20 @@ sap.ui.getCore().attachInit(function () {
                 new sap.m.SegmentedButtonItem({ key: "ADVISORY", text: "Advisory" }),
                 new sap.m.SegmentedButtonItem({ key: "INFO",     text: "Info" })
               ]
-            })
+            });
+
+    return new sap.m.VBox({
+      items: [
+        new sap.m.Toolbar({
+          content: [
+            new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H2 }),
+            new sap.m.ToolbarSpacer(),
+            new sap.m.Button({ icon: "sap-icon://refresh", tooltip: "Refresh", press: loadAll }),
+            _oExcSeverityBtn
           ]
         }),
         _oExcRunFilterBar,
-        oTable
+        _oExceptionsTable
       ]
     });
   }

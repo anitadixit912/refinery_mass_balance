@@ -112,15 +112,22 @@ class ExceptionManagementAgent {
                 .and('severity != \'INFO\'')
         );
 
+        // Delete any stale exceptions for this run (handles re-runs of step 06)
+        await this.db.run(
+            DELETE.from('refinery.massbalance.Exception').where({ run_ID: run.ID })
+        );
+
         let count = 0;
+        // Short run identifier (last 8 chars of UUID, uppercased) for unique exception IDs
+        const runShort = run.ID.replace(/-/g, '').slice(-8).toUpperCase();
 
         for (const line of flaggedLines) {
             const investigation = await this._drillDown(run, line);
 
             // Create exception record (slide 23 structure)
-            const excNumber = String(count + 1).padStart(4, '0');
-            const period    = run.period.replace(/-/g, '');
-            const exceptionId = `EXC-${period.substring(0,6)}-${excNumber}`;
+            const excNumber  = String(count + 1).padStart(4, '0');
+            const period     = run.period.replace(/-/g, '');
+            const exceptionId = `EXC-${period.substring(0,6)}-${runShort}-${excNumber}`;
 
             await this.db.run(
                 INSERT.into('refinery.massbalance.Exception').entries({
