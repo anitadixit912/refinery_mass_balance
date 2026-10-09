@@ -12,6 +12,8 @@ RUN npm install --omit=dev
 
 COPY . .
 
+RUN mkdir -p /app/data && chmod +x /app/start.sh
+
 EXPOSE 4004
 
-CMD ["npm", "start"]
+CMD ["/app/start.sh"]

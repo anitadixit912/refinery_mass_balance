@@ -25,7 +25,7 @@
       "db": {
         "kind": "sqlite",
         "credentials": {
-          "url": ":memory:"
+          "url": "/app/data/massbalance.db"
         }
       }
     }
