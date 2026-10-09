@@ -41,6 +41,8 @@ sap.ui.getCore().attachInit(function () {
   var BASE   = "/api/mass-balance";
   var ADMIN  = "/api/admin";
 
+  var _stepPanels = {}; // action → sap.m.Panel — populated by makeStepCard, used by runAction
+
   var oModel = new sap.ui.model.json.JSONModel({
     runs: [], exceptions: [], approvals: [], plants: [], materials: [], tolerances: [],
     kpi: { totalRuns: 0, criticalExceptions: 0, pendingApprovals: 0, balanceStatus: "—" },
@@ -293,27 +295,37 @@ sap.ui.getCore().attachInit(function () {
   function runAction(path, runId, label) {
     if (!window.confirm("Run \"" + label + "\" for run:\n" + runId + "\n\nAI agents will execute this step.")) return;
     oModel.setProperty("/busy", true);
-    var aiSteps = ["investigateAndClassify", "generateExceptionReport", "generateExecutiveSummary"];
-    if (aiSteps.indexOf(path) !== -1) {
-      sap.m.MessageToast.show(label + " started — AI analysis in progress, please wait (this may take 1–2 min)...", { duration: 10000 });
-    }
+    var stepRef = _stepPanels[path];
+    if (stepRef) stepRef.panel.setBusy(true);
     odataPost(BASE + "/" + path, { runId: runId })
       .then(function(r){
         oModel.setProperty("/busy", false);
+        if (stepRef) {
+          stepRef.panel.setBusy(false);
+          var nav = _stepNavMap[path];
+          if (nav && !(r && r.error)) {
+            stepRef.btn.detachPress(stepRef.press);
+            stepRef.btn.setText(nav.label);
+            stepRef.btn.setType(sap.m.ButtonType.Accept);
+            stepRef.btn.setIcon("sap-icon://navigation-right-arrow");
+            stepRef.btn.attachPress(function() { oIconTabBar.setSelectedKey(nav.key); loadAll(); });
+          }
+        }
         if (r && r.error) {
           sap.m.MessageToast.show(label + " failed: " + r.error.message);
         } else {
-          var nav = _stepNavMap[path];
+          var nav2 = _stepNavMap[path];
           showResultDialog(
             "Step Complete — " + label,
             formatAgentResult(label, r),
-            nav ? nav.label : null,
-            nav ? function() { oIconTabBar.setSelectedKey(nav.key); loadAll(); } : null
+            nav2 ? nav2.label : null,
+            nav2 ? function() { oIconTabBar.setSelectedKey(nav2.key); loadAll(); } : null
           );
           loadAll();
         }
       }).catch(function(e){
         oModel.setProperty("/busy", false);
+        if (stepRef) stepRef.panel.setBusy(false);
         sap.m.MessageToast.show(label + " failed: " + e.message);
       });
   }
@@ -754,36 +766,40 @@ sap.ui.getCore().attachInit(function () {
     }
 
     function makeStepCard(num, icon, title, desc, action, btnText, emphasized) {
-      return new sap.m.VBox({
-        width: "260px",
-        items: [ new sap.m.Panel({
-          expandable: false,
-          content: [
-            new sap.m.HBox({
-              alignItems: sap.m.FlexAlignItems.Start,
-              items: [
-                new sap.ui.core.Icon({ src: icon, size: "1.8rem", color: emphasized ? "#0070f2" : "#47637d" })
-                  .addStyleClass("sapUiSmallMarginEnd"),
-                new sap.m.VBox({ items: [
-                  new sap.m.Title({ text: "Step " + num + " — " + title, level: sap.ui.core.TitleLevel.H5 }),
-                  new sap.m.Text({ text: desc }).addStyleClass("sapUiTinyMarginTop")
-                ]})
-              ]
-            }).addStyleClass("sapUiSmallMarginBottom"),
-            new sap.m.Button({
-              text: btnText,
-              icon: icon,
-              type: emphasized ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
-              press: (function(a, t) {
-                return function() {
-                  try { pipelineAction(a, t); }
-                  catch(err) { sap.m.MessageToast.show("Error: " + err.message); }
-                };
-              }(action, title))
-            })
-          ]
-        })]
-      }).addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
+      var fnPress = (function(a, t) {
+        return function() {
+          try { pipelineAction(a, t); }
+          catch(err) { sap.m.MessageToast.show("Error: " + err.message); }
+        };
+      }(action, title));
+
+      var oBtn = new sap.m.Button({
+        text: btnText,
+        icon: icon,
+        type: emphasized ? sap.m.ButtonType.Emphasized : sap.m.ButtonType.Default,
+        press: fnPress
+      });
+
+      var oPanel = new sap.m.Panel({
+        expandable: false,
+        content: [
+          new sap.m.HBox({
+            alignItems: sap.m.FlexAlignItems.Start,
+            items: [
+              new sap.ui.core.Icon({ src: icon, size: "1.8rem", color: emphasized ? "#0070f2" : "#47637d" })
+                .addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Title({ text: "Step " + num + " — " + title, level: sap.ui.core.TitleLevel.H5 }),
+                new sap.m.Text({ text: desc }).addStyleClass("sapUiTinyMarginTop")
+              ]})
+            ]
+          }).addStyleClass("sapUiSmallMarginBottom"),
+          oBtn
+        ]
+      });
+      _stepPanels[action] = { panel: oPanel, btn: oBtn, press: fnPress };
+      return new sap.m.VBox({ width: "260px", items: [ oPanel ] })
+        .addStyleClass("sapUiSmallMarginEnd sapUiSmallMarginBottom");
     }
 
     var oStepBox = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap, items: [
