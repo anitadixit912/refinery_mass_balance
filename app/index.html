@@ -41,7 +41,10 @@ sap.ui.getCore().attachInit(function () {
   var BASE   = "/api/mass-balance";
   var ADMIN  = "/api/admin";
 
-  var _stepPanels = {}; // action → sap.m.Panel — populated by makeStepCard, used by runAction
+  var _stepPanels = {}; // action → { panel, btn, press } — populated by makeStepCard
+  var _exceptionsRunFilter = null; // UUID of run to filter exceptions by; null = show all
+  var _oExcRunFilterBar  = null;  // InfoToolbar shown when a run filter is active
+  var _oExcRunFilterText = null;  // Text control inside that bar
 
   var oModel = new sap.ui.model.json.JSONModel({
     runs: [], exceptions: [], approvals: [], plants: [], materials: [], tolerances: [],
@@ -73,9 +76,11 @@ sap.ui.getCore().attachInit(function () {
 
   function loadAll() {
     oModel.setProperty("/busy", true);
+    var excUrl = BASE + "/Exceptions?$orderby=createdAt desc&$top=100&$select=ID,exceptionId,severity,rootCauseCategory,varianceMT,variancePct,varianceSign,status,period,run_ID,plant_ID,tank_ID,material_ID";
+    if (_exceptionsRunFilter) excUrl += "&$filter=run_ID eq " + _exceptionsRunFilter;
     Promise.all([
       odata(BASE + "/MassBalanceRuns?$orderby=createdAt desc&$top=50"),
-      odata(BASE + "/Exceptions?$orderby=createdAt desc&$top=100&$select=ID,exceptionId,severity,rootCauseCategory,varianceMT,variancePct,varianceSign,status,period,run_ID,plant_ID,tank_ID,material_ID"),
+      odata(excUrl),
       odata(BASE + "/ApprovalRequests?$orderby=requestedAt desc&$top=100"),
       odata(ADMIN + "/Plants"),
       odata(ADMIN + "/Materials"),
@@ -97,6 +102,15 @@ sap.ui.getCore().attachInit(function () {
       oModel.setProperty("/kpi/criticalExceptions", excs.filter(function(e){ return e.severity === "CRITICAL"; }).length);
       oModel.setProperty("/kpi/pendingApprovals",   apprs.filter(function(a){ return a.approvalStatus === "PENDING"; }).length);
       oModel.setProperty("/kpi/balanceStatus",      lastRun ? lastRun.balanceStatus || "—" : "—");
+
+      // update exceptions-tab run filter banner
+      if (_oExcRunFilterBar) {
+        _oExcRunFilterBar.setVisible(!!_exceptionsRunFilter);
+        if (_exceptionsRunFilter) {
+          var filteredRun = runs.find(function(r){ return r.ID === _exceptionsRunFilter; });
+          _oExcRunFilterText.setText("Showing exceptions for: " + (filteredRun ? filteredRun.runId : _exceptionsRunFilter));
+        }
+      }
 
       // Imperatively populate the Pipeline run selector so keys are guaranteed correct
       if (oPipelineRunSel) {
@@ -315,6 +329,10 @@ sap.ui.getCore().attachInit(function () {
           sap.m.MessageToast.show(label + " failed: " + r.error.message);
         } else {
           var nav2 = _stepNavMap[path];
+          // When navigating to the exceptions tab, scope it to this run
+          if (nav2 && nav2.key === "exceptions") {
+            _exceptionsRunFilter = runId;
+          }
           showResultDialog(
             "Step Complete — " + label,
             formatAgentResult(label, r),
@@ -455,6 +473,18 @@ sap.ui.getCore().attachInit(function () {
                     if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
                     runAction("generateExceptionReport", id, "Exception Report");
                   }
+                }).addStyleClass("sapUiTinyMarginBegin"),
+                new sap.m.Button({
+                  icon: "sap-icon://exception",
+                  tooltip: "View Exceptions for this run",
+                  press: function(e) {
+                    var ctx = e.getSource().getBindingContext();
+                    var id = ctx ? ctx.getProperty("ID") : null;
+                    if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    _exceptionsRunFilter = id;
+                    oIconTabBar.setSelectedKey("exceptions");
+                    loadAll();
+                  }
                 }).addStyleClass("sapUiTinyMarginBegin")
               ]
             })
@@ -536,6 +566,25 @@ sap.ui.getCore().attachInit(function () {
       }
     });
 
+    _oExcRunFilterText = new sap.m.Text({ text: "" });
+    _oExcRunFilterBar  = new sap.m.Toolbar({
+      visible: false,
+      style: sap.m.ToolbarStyle.Info,
+      content: [
+        new sap.ui.core.Icon({ src: "sap-icon://filter", color: "#0070f2" }).addStyleClass("sapUiTinyMarginEnd"),
+        _oExcRunFilterText,
+        new sap.m.ToolbarSpacer(),
+        new sap.m.Button({
+          text: "Show All Runs",
+          icon: "sap-icon://clear-filter",
+          press: function() {
+            _exceptionsRunFilter = null;
+            loadAll();
+          }
+        })
+      ]
+    });
+
     return new sap.m.VBox({
       items: [
         new sap.m.Toolbar({
@@ -562,12 +611,11 @@ sap.ui.getCore().attachInit(function () {
             })
           ]
         }),
+        _oExcRunFilterBar,
         oTable
       ]
     });
   }
-
-  // ─── APPROVALS TABLE ─────────────────────────────────────────────────────
   function buildApprovalsPage() {
     var oTable = new sap.m.Table({
       growing: true,
