@@ -133,11 +133,11 @@ module.exports = cds.service.impl(async function (srv) {
             'SYSTEM', 'SUCCESS');
 
         return {
-            plantLines    : result.plantLines,
-            tankLines     : result.tankLines,
-            materialLines : result.materialLines,
-            exceptionsFound: compareResult.exceptionsFound,
-            message       : compareResult.message,
+            plantLines     : result.plantLines,
+            tankLines      : result.tankLines,
+            materialLines  : result.materialLines,
+            variancesFound : compareResult.exceptionsFound,
+            message        : compareResult.message,
         };
     });
 

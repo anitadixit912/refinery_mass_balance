@@ -227,7 +227,7 @@ sap.ui.getCore().attachInit(function () {
     var keyLabels = {
       checksPassed:"Checks Passed", checksFailed:"Checks Failed", blockerCount:"Blockers",
       linesProcessed:"Lines Processed", totalVarianceMT:"Total Variance (MT)", balanceStatus:"Balance Status",
-      plantLines:"Plant Lines", tankLines:"Tank Lines", materialLines:"Material Lines", exceptionsFound:"Exceptions Found",
+      plantLines:"Plant Lines", tankLines:"Tank Lines", materialLines:"Material Lines", exceptionsFound:"Exceptions Found", variancesFound:"Variances Detected",
       infoCount:"INFO Count", advisoryCount:"ADVISORY Count", warningCount:"WARNING Count", criticalCount:"CRITICAL Count",
       overallStatus:"Overall Status", exceptionsInvestigated:"Investigated", classified:"Classified",
       pendingClassification:"Pending Classification", reportId:"Report ID", totalExceptions:"Total Exceptions",
@@ -281,13 +281,13 @@ sap.ui.getCore().attachInit(function () {
   }
 
   var _stepNavMap = {
-    "validateData":             { label: "View Run Status →",     key: "runs"       },
-    "calculateBalance":         { label: "View Run Status →",     key: "runs"       },
-    "reconcileAndCompare":      { label: "View Exceptions →",     key: "exceptions" },
-    "checkTolerances":          { label: "View Exceptions →",     key: "exceptions" },
-    "investigateAndClassify":   { label: "View Exceptions →",     key: "exceptions" },
-    "generateExceptionReport":  { label: "View Report / Exceptions →", key: "exceptions" },
-    "generateExecutiveSummary": { label: "View Dashboard →",      key: "dashboard"  }
+    "validateData":             { label: "View Run Status →",              key: "runs"       },
+    "calculateBalance":         { label: "View Run Status →",              key: "runs"       },
+    "reconcileAndCompare":      { label: "Next: Check Tolerances (Step 05) →", key: "pipeline"  },
+    "checkTolerances":          { label: "Next: Investigate (Step 06) →",  key: "pipeline"   },
+    "investigateAndClassify":   { label: "View Exceptions →",              key: "exceptions" },
+    "generateExceptionReport":  { label: "View Exceptions →",              key: "exceptions" },
+    "generateExecutiveSummary": { label: "View Dashboard →",               key: "dashboard"  }
   };
 
   function runAction(path, runId, label) {
