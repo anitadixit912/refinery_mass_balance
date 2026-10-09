@@ -73,7 +73,7 @@ sap.ui.getCore().attachInit(function () {
     oModel.setProperty("/busy", true);
     Promise.all([
       odata(BASE + "/MassBalanceRuns?$orderby=createdAt desc&$top=50"),
-      odata(BASE + "/Exceptions?$orderby=createdAt desc&$top=100"),
+      odata(BASE + "/Exceptions?$orderby=createdAt desc&$top=100&$select=ID,exceptionId,severity,rootCauseCategory,varianceMT,variancePct,varianceSign,status,period,run_ID,plant_ID,tank_ID,material_ID"),
       odata(BASE + "/ApprovalRequests?$orderby=requestedAt desc&$top=100"),
       odata(ADMIN + "/Plants"),
       odata(ADMIN + "/Materials"),
@@ -293,6 +293,10 @@ sap.ui.getCore().attachInit(function () {
   function runAction(path, runId, label) {
     if (!window.confirm("Run \"" + label + "\" for run:\n" + runId + "\n\nAI agents will execute this step.")) return;
     oModel.setProperty("/busy", true);
+    var aiSteps = ["investigateAndClassify", "generateExceptionReport", "generateExecutiveSummary"];
+    if (aiSteps.indexOf(path) !== -1) {
+      sap.m.MessageToast.show(label + " started — AI analysis in progress, please wait (this may take 1–2 min)...", { duration: 10000 });
+    }
     odataPost(BASE + "/" + path, { runId: runId })
       .then(function(r){
         oModel.setProperty("/busy", false);
@@ -481,7 +485,7 @@ sap.ui.getCore().attachInit(function () {
         new sap.m.Column({ header: new sap.m.Label({ text: "Variance MT" }) }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Variance %" }) }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "Description" }) })
+        new sap.m.Column({ header: new sap.m.Label({ text: "Period" }) })
       ],
       items: {
         path: "/exceptions",
@@ -508,13 +512,13 @@ sap.ui.getCore().attachInit(function () {
               text: { path: "varianceMT", formatter: function(v){ return v ? parseFloat(v).toFixed(3) + " MT" : "—"; } }
             }),
             new sap.m.Text({
-              text: { path: "variancePct", formatter: function(v){ return v ? (parseFloat(v)*100).toFixed(3) + " %" : "—"; } }
+              text: { path: "variancePct", formatter: function(v){ return v ? parseFloat(v).toFixed(4) + " %" : "—"; } }
             }),
             new sap.m.ObjectStatus({
               text: "{status}",
               state: { path: "status", formatter: function(s){ return statusState(s); } }
             }),
-            new sap.m.Text({ text: "{description}", wrapping: false })
+            new sap.m.Text({ text: "{period}", wrapping: false })
           ]
         })
       }
