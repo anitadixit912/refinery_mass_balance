@@ -31,6 +31,7 @@ applications:
     timeout: 120
     services:
       - mass-balance-cap-app-destination
+      - mass-balance-cap-app-connectivity
 
     env:
       NODE_ENV: production

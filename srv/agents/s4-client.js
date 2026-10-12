@@ -46,71 +46,57 @@ function _periodDates(period) {
     };
 }
 
+// Cloud SDK v4 paramsSerializer doesn't URL-encode values; pre-encode OData filters.
+const _f = (filter) => encodeURIComponent(filter);
+
 class S4Client {
 
-    // ── MASTER DATA — Plants ───────────────────────────────────────────
+    // ── MASTER DATA — Plants (derived from movement doc plant field) ──
     async getPlants() {
-        try {
-            const res = await executeHttpRequest(
-                { destinationName: DEST },
-                {
-                    method: 'GET',
-                    url   : '/sap/opu/odata/sap/MD_PLANT_API_SRV/A_Plant',
-                    params: { '$select': 'Plant,PlantName,Country,Region', '$format': 'json', '$top': '500' },
-                }
-            );
-            return (res.data?.d?.results || []).map(p => ({
-                plantCode: p.Plant,
-                plantName: p.PlantName || p.Plant,
-                country  : p.Country   || '',
-                region   : p.Region    || '',
-            }));
-        } catch {
-            // Fallback: extract unique plant codes from product-plant assignments
-            const res = await executeHttpRequest(
-                { destinationName: DEST },
-                {
-                    method: 'GET',
-                    url   : '/sap/opu/odata/sap/API_PRODUCT_SRV/A_ProductPlant',
-                    params: { '$select': 'Plant', '$format': 'json', '$top': '5000' },
-                }
-            );
-            const codes = [...new Set((res.data?.d?.results || []).map(p => p.Plant).filter(Boolean))];
-            return codes.map(c => ({ plantCode: c, plantName: c, country: '', region: '' }));
-        }
-    }
-
-    // ── MASTER DATA — Materials ────────────────────────────────────────
-    async getMaterials() {
+        // Use A_MaterialDocumentItem which the MM user is authorized for
         const res = await executeHttpRequest(
             { destinationName: DEST },
             {
                 method: 'GET',
-                url   : '/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product',
-                params: {
-                    '$select': 'Product,ProductDescription,BaseUnit,ProductGroup,GrossWeight',
-                    '$format': 'json',
-                    '$top'   : '2000',
-                },
+                url   : '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem',
+                params: { '$select': 'Plant', '$format': 'json', '$top': '5000' },
             }
         );
-        return (res.data?.d?.results || []).map(m => ({
-            materialCode: (m.Product || '').trim(),
-            materialDesc: m.ProductDescription || m.Product || '',
-            baseUom     : m.BaseUnit           || 'MT',
-            productGroup: m.ProductGroup       || 'GP',
-        }));
+        const codes = [...new Set((res.data?.d?.results || []).map(r => r.Plant).filter(Boolean))];
+        return codes.map(c => ({ plantCode: c, plantName: c, country: '', region: '' }));
     }
 
-    // ── MASTER DATA — Storage Locations (= Tanks) ─────────────────────
+    // ── MASTER DATA — Materials (derived from movement docs) ──────────
+    async getMaterials() {
+        // Use A_MaterialDocumentItem (same API as plants — MM user authorized)
+        const res = await executeHttpRequest(
+            { destinationName: DEST },
+            {
+                method: 'GET',
+                url   : '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem',
+                params: { '$select': 'Material,EntryUnit', '$format': 'json', '$top': '5000' },
+            }
+        );
+        const seen = new Set();
+        return (res.data?.d?.results || [])
+            .filter(r => r.Material && !seen.has(r.Material) && seen.add(r.Material))
+            .map(r => ({
+                materialCode: (r.Material || '').trim(),
+                materialDesc: (r.Material || '').trim(),
+                baseUom     : r.EntryUnit || 'MT',
+                productGroup: 'GP',
+            }));
+    }
+
+    // ── MASTER DATA — Storage Locations (from stock table per plant) ──
     async getStorageLocations(plantCode) {
         const res = await executeHttpRequest(
             { destinationName: DEST },
             {
                 method: 'GET',
-                url   : '/sap/opu/odata/sap/API_PRODUCT_SRV/A_ProductStorageLocation',
+                url   : '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod',
                 params: {
-                    '$filter': `Plant eq '${plantCode}'`,
+                    '$filter': _f(`Plant eq '${plantCode}'`),
                     '$select': 'StorageLocation,Plant',
                     '$format': 'json',
                     '$top'   : '500',
@@ -130,7 +116,7 @@ class S4Client {
                 method : 'GET',
                 url    : '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem',
                 params : {
-                    '$filter': `Plant eq '${plantCode}' and PostingDate ge datetime'${startDate}T00:00:00' and PostingDate le datetime'${endDate}T23:59:59'`,
+                    '$filter': _f(`Plant eq '${plantCode}' and PostingDate ge datetime'${startDate}T00:00:00' and PostingDate le datetime'${endDate}T23:59:59'`),
                     '$select': 'MaterialDocument,MaterialDocumentItem,Material,Plant,StorageLocation,GoodsMovementType,QuantityInEntryUnit,EntryUnit,PostingDate',
                     '$format': 'json',
                     '$top'   : '5000',
@@ -160,7 +146,7 @@ class S4Client {
                 method : 'GET',
                 url    : '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod',
                 params : {
-                    '$filter': `Plant eq '${plantCode}'`,
+                    '$filter': _f(`Plant eq '${plantCode}'`),
                     '$select': 'Material,Plant,StorageLocation,MatlWrhsStkQtyInMatlBaseUnit,InQualityInspectionStockQty,BlockedStockQty,TransitStockQty,BaseUnit',
                     '$format': 'json',
                     '$top'   : '2000',
@@ -188,7 +174,7 @@ class S4Client {
                 method : 'GET',
                 url    : '/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV/A_PhysInventoryDocHeader',
                 params : {
-                    '$filter': `PlantOfPhysInvtryDoc eq '${plantCode}' and FiscalYear eq '${fiscalYear}'`,
+                    '$filter': _f(`PlantOfPhysInvtryDoc eq '${plantCode}' and FiscalYear eq '${fiscalYear}'`),
                     '$expand': 'to_PhysInventoryDocItem',
                     '$format': 'json',
                     '$top'   : '1000',
