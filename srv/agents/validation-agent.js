@@ -39,7 +39,7 @@ const VALIDATION_CHECKS = [
         id       : 'COMP_001',
         category : 'COMPLETENESS',
         name     : 'All expected tank readings present for the period',
-        severity : 'BLOCKER',
+        severity : 'WARNING',  // Physical inventory (MI07) is periodic, not daily
         check    : async (db, run) => {
             const tanks = await db.run(
                 SELECT.from('refinery.massbalance.Tanks')
@@ -86,19 +86,30 @@ const VALIDATION_CHECKS = [
         name     : 'Book stock records exist for all active materials',
         severity : 'BLOCKER',
         check    : async (db, run) => {
-            const materials = await db.run(
-                SELECT.from('refinery.massbalance.Materials').where({ isActive: true })
+            // Only validate materials that appear in movements for this run.
+            // Globally-synced materials represent the full S/4 catalogue;
+            // a plant will only stock a subset of them.
+            const movements = await db.run(
+                SELECT.from('refinery.massbalance.MaterialMovement')
+                    .where({ run_ID: run.ID })
             );
+            if (movements.length === 0) {
+                // No movements at all — COMP_002 already flags this; don't double-block
+                return { pass: true, issues: [] };
+            }
+            const activeMaterialIds = [...new Set(movements.map(m => m.material_ID).filter(Boolean))];
             const bookStock = await db.run(
                 SELECT.from('refinery.massbalance.BookStockSnapshot')
                     .where({ run_ID: run.ID })
             );
-            const missing = materials.filter(m =>
-                !bookStock.some(b => b.material_ID === m.ID)
-            );
+            const bookMatIds = new Set(bookStock.map(b => b.material_ID));
+            const missingIds = activeMaterialIds.filter(id => !bookMatIds.has(id));
+            const missingMats = missingIds.length
+                ? await db.run(SELECT.from('refinery.massbalance.Materials').where({ ID: { in: missingIds } }))
+                : [];
             return {
-                pass   : missing.length === 0,
-                issues : missing.slice(0, 5).map(m => ({
+                pass   : missingMats.length === 0,
+                issues : missingMats.slice(0, 5).map(m => ({
                     entityId : m.ID,
                     issueDesc: `No book stock record for material ${m.materialCode} (MARD) in period ${run.period}`,
                 })),
@@ -138,7 +149,7 @@ const VALIDATION_CHECKS = [
                     .where({ run_ID: run.ID })
             );
             const invalidUoM = movements.filter(m =>
-                m.uom && !['MT', 'BBL', 'KL', 'M3', 'T'].includes(m.uom)
+                m.uom && !['MT', 'BBL', 'KL', 'M3', 'T', 'TO', 'KG', 'L', 'LT', 'GAL', 'CBM'].includes(m.uom)
             );
             return {
                 pass   : invalidUoM.length === 0,

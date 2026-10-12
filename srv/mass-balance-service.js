@@ -72,6 +72,10 @@ module.exports = cds.service.impl(async function (srv) {
         const { runId } = req.data;
         const run = await _getRun(runId);
 
+        // Ingest live S/4 data before validating — movements, book stock, physical inventory
+        await _setRunStatus(run.ID, 'INGESTING');
+        await orchestrator.dataCollectionAgent.ingestData(run);
+
         await _setRunStatus(run.ID, 'VALIDATING');
 
         const result = await orchestrator.validationAgent.run(run);
