@@ -553,17 +553,27 @@ sap.ui.getCore().attachInit(function () {
                     runAction("generateExceptionReport", id, "Exception Report");
                   }
                 }).addStyleClass("sapUiTinyMarginBegin"),
-                new sap.m.Text({
-                  text: "⚠ Failed run — run Step 06 first",
+                new sap.m.Button({
+                  icon: "sap-icon://alert",
+                  text: "Run Step 06",
+                  type: sap.m.ButtonType.Critical,
+                  tooltip: "Investigate & Classify exceptions (Step 06 — required before generating exception report)",
                   visible: {
                     path: "runStatus",
                     formatter: function(s) {
                       return ["FAILED","INITIATED","VALIDATING","CALCULATING"].indexOf(s) !== -1;
                     }
+                  },
+                  press: function(e) {
+                    var ctx = e.getSource().getBindingContext();
+                    var id = ctx ? ctx.getProperty("ID") : null;
+                    if (!id) { sap.m.MessageToast.show("Could not get Run ID — try refreshing."); return; }
+                    runAction("investigateAndClassify", id, "Investigate & Classify (Step 06)");
                   }
-                }).addStyleClass("sapUiTinyMarginBegin").addStyleClass("sapUiSmallText"),
+                }).addStyleClass("sapUiTinyMarginBegin"),
                 new sap.m.Button({
                   icon: "sap-icon://exception",
+                  text: "View Exceptions",
                   tooltip: "View Exceptions for this run",
                   press: function(e) {
                     var ctx = e.getSource().getBindingContext();

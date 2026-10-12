@@ -1,11 +1,13 @@
 #!/bin/sh
 # Deploy schema + seed data only on first boot (DB file absent).
 # On subsequent restarts the file exists, so data is preserved.
+# Uses a relative path so this works in both Docker (/app) and CF (/home/vcap/app).
 
-DB=/app/data/massbalance.db
+DB=./data/massbalance.db
 
 if [ ! -f "$DB" ]; then
   echo "[start.sh] First boot — deploying schema and seed data to $DB"
+  mkdir -p ./data
   node ./node_modules/@sap/cds-dk/bin/cds.js deploy --to "sqlite:$DB"
   echo "[start.sh] Deploy complete."
 else

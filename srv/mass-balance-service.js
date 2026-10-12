@@ -470,3 +470,14 @@ async function _auditLog(db, runID, runId, agentName, agentStep, action,
 }
 
 module.exports._auditLog = _auditLog;
+
+// ─── Startup: sync master data from S/4 HANA when tables are empty ────────
+cds.on('served', async () => {
+    try {
+        const DataCollectionAgent = require('./agents/data-collection-agent');
+        const agent = new DataCollectionAgent(cds.db);
+        await agent.syncMasterData();
+    } catch (err) {
+        console.warn('[Startup] Master data sync failed:', err.message);
+    }
+});

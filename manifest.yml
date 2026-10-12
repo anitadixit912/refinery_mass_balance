@@ -1,0 +1,50 @@
+---
+# CF manifest for Refinery Mass Balance — single consolidated CAP app.
+# Replaces the 5 separate agent apps (saves ~3.5 GB memory quota).
+#
+# Before pushing:
+#   1. Replace <destination-service-instance> with your actual service name:
+#        cf services   →  find the destination service instance in your space
+#
+#   2. Set AI Core credentials (do NOT put them in this file):
+#        cf set-env refinery-mass-balance AICORE_CLIENT_ID       "sb-3658f927-..."
+#        cf set-env refinery-mass-balance AICORE_CLIENT_SECRET   "acc5e05c-..."
+#        cf set-env refinery-mass-balance AICORE_TOKEN_URL        "https://development-40qq74qu.authentication.us10.hana.ondemand.com/oauth/token"
+#        cf set-env refinery-mass-balance AICORE_API_URL          "https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com"
+#        cf set-env refinery-mass-balance AICORE_DEPLOYMENT_ID   "d20b9095bde7c0ef"
+#        cf set-env refinery-mass-balance AICORE_API_FORMAT       "bedrock"
+#        cf set-env refinery-mass-balance AICORE_RESOURCE_GROUP  "default"
+#
+#   3. Deploy:
+#        cf push
+
+applications:
+  - name: refinery-mass-balance
+    memory: 256M
+    disk_quota: 1G
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    command: sh ./start.sh
+    health-check-type: http
+    health-check-http-endpoint: /
+    timeout: 120
+    services:
+      - mass-balance-cap-app-destination
+
+    env:
+      NODE_ENV: production
+      # AI Core env vars — set via "cf set-env" (see instructions above)
+      # AICORE_CLIENT_ID:      set via cf set-env
+      # AICORE_CLIENT_SECRET:  set via cf set-env
+      # AICORE_TOKEN_URL:      set via cf set-env
+      # AICORE_API_URL:        set via cf set-env
+      # AICORE_DEPLOYMENT_ID:  set via cf set-env
+      AICORE_API_FORMAT: bedrock
+      AICORE_RESOURCE_GROUP: default
+
+# NOTE — SQLite on CF:
+#   CF containers are ephemeral. The SQLite DB (./data/massbalance.db) is
+#   recreated from seed data on every app restart (start.sh handles this).
+#   Run history, exceptions and approvals are lost on restart.
+#   For production persistence, migrate to SAP HANA Cloud or PostgreSQL.

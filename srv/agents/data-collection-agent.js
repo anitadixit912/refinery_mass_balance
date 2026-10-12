@@ -1,5 +1,7 @@
 'use strict';
 
+const s4Client = require('./s4-client');
+
 /**
  * Data Collection Agent  (Sub-agent 1 of 5)
  *
@@ -97,8 +99,14 @@ class DataCollectionAgent {
             );
 
             if (existingMovements.length === 0) {
-                // Simulate movement ingestion for the period
-                await this._simulateMovements(run);
+                try {
+                    await this._fetchMovementsFromS4(run);
+                } catch (err) {
+                    console.warn(`[DataCollectionAgent] S/4 movements fetch failed: ${err.message}`);
+                    await this._log(run, 'DataCollectionAgent', 'INGEST_MOV',
+                        `S/4 HANA movements fetch failed — no data ingested: ${err.message}`,
+                        'SAP_S4HANA', 'WARNING');
+                }
             }
 
             const count = await this.db.run(
@@ -128,7 +136,14 @@ class DataCollectionAgent {
             );
 
             if (existing.length === 0) {
-                await this._simulatePhysicalInventory(run);
+                try {
+                    await this._fetchPhysicalInventoryFromS4(run);
+                } catch (err) {
+                    console.warn(`[DataCollectionAgent] S/4 physical inventory fetch failed: ${err.message}`);
+                    await this._log(run, 'DataCollectionAgent', 'INGEST_PHYS',
+                        `S/4 HANA physical inventory fetch failed — no data ingested: ${err.message}`,
+                        'SAP_S4HANA', 'WARNING');
+                }
             }
 
             await this._log(run, 'DataCollectionAgent', 'INGEST_PHYS',
@@ -151,7 +166,14 @@ class DataCollectionAgent {
             );
 
             if (existing.length === 0) {
-                await this._simulateBookStock(run);
+                try {
+                    await this._fetchBookStockFromS4(run);
+                } catch (err) {
+                    console.warn(`[DataCollectionAgent] S/4 book stock fetch failed: ${err.message}`);
+                    await this._log(run, 'DataCollectionAgent', 'INGEST_BOOK',
+                        `S/4 HANA book stock fetch failed — no data ingested: ${err.message}`,
+                        'SAP_S4HANA', 'WARNING');
+                }
             }
 
             await this._log(run, 'DataCollectionAgent', 'INGEST_BOOK',
@@ -164,109 +186,244 @@ class DataCollectionAgent {
         }
     }
 
-    // ── Simulation helpers (replace with real API calls in production) ──
+    // ── S/4 HANA live data ingestion (via OGS_S4 BTP destination) ──────
 
-    async _simulateMovements(run) {
-        const tanks = await this.db.run(
-            SELECT.from('refinery.massbalance.Tanks')
-                .where({ plant_ID: run.plant_ID, isActive: true })
+    async _getPlantCode(run) {
+        const plant = await this.db.run(
+            SELECT.one('plantCode').from('refinery.massbalance.Plants').where({ ID: run.plant_ID })
         );
-        const materials = await this.db.run(
-            SELECT.from('refinery.massbalance.Materials').where({ isActive: true })
-        );
+        return plant?.plantCode;
+    }
+
+    async _fetchMovementsFromS4(run) {
+        const plantCode = await this._getPlantCode(run);
+        if (!plantCode) return;
+
+        const tanks     = await this.db.run(SELECT.from('refinery.massbalance.Tanks').where({ plant_ID: run.plant_ID, isActive: true }));
+        const materials = await this.db.run(SELECT.from('refinery.massbalance.Materials').where({ isActive: true }));
         if (!tanks.length || !materials.length) return;
 
-        const movCategories = ['GR','GI','TRANSFER','PRODUCTION','CONSUMPTION'];
-        const entries = tanks.slice(0, 5).map((tank, i) => ({
-            ID             : uuidv4(),
-            run_ID         : run.ID,
-            docNumber      : `49${String(i).padStart(7,'0')}`,
-            lineItem       : '0001',
-            material_ID    : materials[i % materials.length].ID,
-            plant_ID       : run.plant_ID,
-            tank_ID        : tank.ID,
-            storageLocation: '0001',
-            movementType   : ['101','201','311','131','261'][i % 5],
-            movementCategory: movCategories[i % movCategories.length],
-            postingDate    : run.period,
-            quantity       : parseFloat((Math.random() * 5000 + 500).toFixed(3)),
-            uom            : 'MT',
-            quantityMT     : parseFloat((Math.random() * 5000 + 500).toFixed(3)),
-        }));
+        const tankBySLoc = Object.fromEntries(tanks.map(t => [t.storageLocation, t]));
+        const matByCode  = Object.fromEntries(materials.map(m => [m.materialCode.trim(), m]));
+
+        const s4Items = await s4Client.getMovements(plantCode, run.period);
+        if (!s4Items.length) return;
+
+        const entries = s4Items.map(i => {
+            const tank = tankBySLoc[i.storageLocation] || tanks[0];
+            const mat  = matByCode[i.materialCode]     || materials[0];
+            return {
+                ID              : uuidv4(),
+                run_ID          : run.ID,
+                docNumber       : i.docNumber,
+                lineItem        : i.lineItem,
+                material_ID     : mat.ID,
+                plant_ID        : run.plant_ID,
+                tank_ID         : tank.ID,
+                storageLocation : i.storageLocation,
+                movementType    : i.movementType,
+                movementCategory: i.movementCategory,
+                postingDate     : i.postingDate || run.period,
+                quantity        : parseFloat(i.quantity.toFixed(3)),
+                uom             : i.uom,
+                quantityMT      : parseFloat(i.quantity.toFixed(3)),
+            };
+        });
         await this.db.run(INSERT.into('refinery.massbalance.MaterialMovement').entries(entries));
     }
 
-    async _simulatePhysicalInventory(run) {
-        const tanks = await this.db.run(
-            SELECT.from('refinery.massbalance.Tanks')
-                .where({ plant_ID: run.plant_ID, isActive: true })
-        );
-        const materials = await this.db.run(
-            SELECT.from('refinery.massbalance.Materials').where({ isActive: true })
-        );
+    async _fetchPhysicalInventoryFromS4(run) {
+        const plantCode = await this._getPlantCode(run);
+        if (!plantCode) return;
+
+        const tanks     = await this.db.run(SELECT.from('refinery.massbalance.Tanks').where({ plant_ID: run.plant_ID, isActive: true }));
+        const materials = await this.db.run(SELECT.from('refinery.massbalance.Materials').where({ isActive: true }));
         if (!tanks.length || !materials.length) return;
 
-        const entries = tanks.slice(0, 5).map((tank, i) => {
-            const dipReading = parseFloat((Math.random() * 3000 + 1000).toFixed(3));
-            const density    = parseFloat((0.85 + Math.random() * 0.1).toFixed(6));
-            const temp       = parseFloat((15 + Math.random() * 20).toFixed(2));
+        const tankBySLoc = Object.fromEntries(tanks.map(t => [t.storageLocation, t]));
+        const matByCode  = Object.fromEntries(materials.map(m => [m.materialCode.trim(), m]));
+
+        const s4Items = await s4Client.getPhysicalInventory(plantCode, run.period);
+        if (!s4Items.length) return;
+
+        const entries = s4Items.map(i => {
+            const tank     = tankBySLoc[i.storageLocation] || tanks[0];
+            const mat      = matByCode[i.materialCode]     || materials[0];
+            const density  = mat.density || 0.86;
+            const qty      = parseFloat(i.countedQty.toFixed(3));
+            const dipRead  = density > 0 ? parseFloat((qty / density).toFixed(3)) : qty;
             return {
                 ID             : uuidv4(),
                 run_ID         : run.ID,
-                docNumber      : `MI${String(i).padStart(8,'0')}`,
-                docType        : 'MI07',
+                docNumber      : i.docNumber,
+                docType        : i.docType,
                 tank_ID        : tank.ID,
-                material_ID    : materials[i % materials.length].ID,
+                material_ID    : mat.ID,
                 plant_ID       : run.plant_ID,
-                storageLocation: '0001',
+                storageLocation: i.storageLocation,
                 readingDate    : run.period,
                 readingTime    : '08:00:00',
-                source         : i % 2 === 0 ? 'ATG' : 'MANUAL',
-                dipReading,
-                temperature    : temp,
+                source         : 'ATG',
+                dipReading     : dipRead,
+                temperature    : 15,
                 density,
                 apiGravity     : parseFloat((141.5 / (density + 131.5)).toFixed(2)),
-                waterBottom    : parseFloat((dipReading * 0.005).toFixed(3)),
-                quantityMT     : parseFloat(((dipReading - dipReading * 0.005) * density).toFixed(3)),
-                quantityBBL    : parseFloat(((dipReading * density / 0.159).toFixed(3))),
-                isFinalReading : true,
-                isVerified     : false,
+                waterBottom    : parseFloat((dipRead * 0.005).toFixed(3)),
+                quantityMT     : qty,
+                quantityBBL    : parseFloat((qty / 0.159).toFixed(3)),
+                isFinalReading : i.isPosted,
+                isVerified     : i.isPosted,
             };
         });
         await this.db.run(INSERT.into('refinery.massbalance.PhysicalInventory').entries(entries));
     }
 
-    async _simulateBookStock(run) {
-        const tanks = await this.db.run(
-            SELECT.from('refinery.massbalance.Tanks')
-                .where({ plant_ID: run.plant_ID, isActive: true })
-        );
-        const materials = await this.db.run(
-            SELECT.from('refinery.massbalance.Materials').where({ isActive: true })
-        );
+    async _fetchBookStockFromS4(run) {
+        const plantCode = await this._getPlantCode(run);
+        if (!plantCode) return;
+
+        const tanks     = await this.db.run(SELECT.from('refinery.massbalance.Tanks').where({ plant_ID: run.plant_ID, isActive: true }));
+        const materials = await this.db.run(SELECT.from('refinery.massbalance.Materials').where({ isActive: true }));
         if (!tanks.length || !materials.length) return;
 
-        const entries = tanks.slice(0, 5).map((tank, i) => {
-            const unrestricted = parseFloat((Math.random() * 4000 + 800).toFixed(3));
+        const tankBySLoc = Object.fromEntries(tanks.map(t => [t.storageLocation, t]));
+        const matByCode  = Object.fromEntries(materials.map(m => [m.materialCode.trim(), m]));
+
+        const s4Items = await s4Client.getBookStock(plantCode);
+        if (!s4Items.length) return;
+
+        const entries = s4Items.map(i => {
+            const tank         = tankBySLoc[i.storageLocation] || tanks[0];
+            const mat          = matByCode[i.materialCode]     || materials[0];
+            const unrestricted = parseFloat(i.unrestricted.toFixed(3));
             return {
-                ID             : uuidv4(),
-                run_ID         : run.ID,
-                material_ID    : materials[i % materials.length].ID,
-                plant_ID       : run.plant_ID,
-                tank_ID        : tank.ID,
-                storageLocation: '0001',
-                snapshotDate   : run.period,
-                snapshotTime   : '23:59:00',
+                ID              : uuidv4(),
+                run_ID          : run.ID,
+                material_ID     : mat.ID,
+                plant_ID        : run.plant_ID,
+                tank_ID         : tank.ID,
+                storageLocation : i.storageLocation,
+                snapshotDate    : run.period,
+                snapshotTime    : '23:59:00',
                 unrestricted,
-                qualInspection : 0,
-                blocked        : 0,
-                inTransit      : parseFloat((Math.random() * 50).toFixed(3)),
-                totalBook      : unrestricted,
+                qualInspection  : parseFloat(i.qualInspection.toFixed(3)),
+                blocked         : parseFloat(i.blocked.toFixed(3)),
+                inTransit       : parseFloat(i.inTransit.toFixed(3)),
+                totalBook       : unrestricted,
                 periodEndBalance: unrestricted,
-                isPeriodClose  : run.periodType === 'MONTHLY',
+                isPeriodClose   : run.periodType === 'MONTHLY',
             };
         });
         await this.db.run(INSERT.into('refinery.massbalance.BookStockSnapshot').entries(entries));
+    }
+
+    // ── MASTER DATA SYNC — called on startup when tables are empty ────
+    async syncMasterData() {
+        const log  = (msg) => console.log(`[MasterDataSync] ${msg}`);
+        const warn = (msg) => console.warn(`[MasterDataSync] ${msg}`);
+
+        // Plants
+        try {
+            const existing = await this.db.run(SELECT.from('refinery.massbalance.Plants'));
+            if (existing.length === 0) {
+                log('Plants table empty — fetching from S/4 HANA...');
+                const s4Plants = await s4Client.getPlants();
+                if (s4Plants.length) {
+                    await this.db.run(INSERT.into('refinery.massbalance.Plants').entries(
+                        s4Plants.map(p => ({
+                            ID       : uuidv4(),
+                            plantCode: p.plantCode,
+                            plantName: p.plantName,
+                            country  : p.country,
+                            region   : p.region,
+                            isActive : true,
+                        }))
+                    ));
+                    log(`Synced ${s4Plants.length} plants from S/4 HANA.`);
+                } else {
+                    warn('No plants returned from S/4 HANA.');
+                }
+            } else {
+                log(`Plants already loaded (${existing.length}).`);
+            }
+        } catch (err) {
+            warn(`Plant sync failed: ${err.message}`);
+        }
+
+        // Materials
+        try {
+            const existing = await this.db.run(SELECT.from('refinery.massbalance.Materials'));
+            if (existing.length === 0) {
+                log('Materials table empty — fetching from S/4 HANA...');
+                const s4Materials = await s4Client.getMaterials();
+                if (s4Materials.length) {
+                    await this.db.run(INSERT.into('refinery.massbalance.Materials').entries(
+                        s4Materials.map(m => ({
+                            ID           : uuidv4(),
+                            materialCode : m.materialCode,
+                            materialDesc : m.materialDesc,
+                            baseUom      : m.baseUom,
+                            productGroup : m.productGroup,
+                            materialGroup: 'GP',
+                            density      : 0.86,
+                            isActive     : true,
+                        }))
+                    ));
+                    log(`Synced ${s4Materials.length} materials from S/4 HANA.`);
+                } else {
+                    warn('No materials returned from S/4 HANA.');
+                }
+            } else {
+                log(`Materials already loaded (${existing.length}).`);
+            }
+        } catch (err) {
+            warn(`Material sync failed: ${err.message}`);
+        }
+
+        // Tanks — derived from Storage Locations per plant
+        try {
+            const existing = await this.db.run(SELECT.from('refinery.massbalance.Tanks'));
+            if (existing.length === 0) {
+                const plants    = await this.db.run(SELECT.from('refinery.massbalance.Plants').where({ isActive: true }));
+                const materials = await this.db.run(SELECT.from('refinery.massbalance.Materials').where({ isActive: true }));
+                if (plants.length && materials.length) {
+                    log(`Fetching storage locations for ${plants.length} plants from S/4 HANA...`);
+                    const tanks = [];
+                    for (const plant of plants) {
+                        try {
+                            const slocs = await s4Client.getStorageLocations(plant.plantCode);
+                            for (const sl of slocs) {
+                                tanks.push({
+                                    ID             : uuidv4(),
+                                    tankId         : `${plant.plantCode}-${sl.storageLocation}`,
+                                    tankName       : `${sl.storageLocation} (${plant.plantCode})`,
+                                    plant_ID       : plant.ID,
+                                    material_ID    : materials[0].ID,
+                                    storageLocation: sl.storageLocation,
+                                    capacity       : 50000,
+                                    densityFactor  : 0.86,
+                                    tempCorrFactor : 0.00072,
+                                    tankType       : 'CRUDE',
+                                    isActive       : true,
+                                });
+                            }
+                        } catch (e) {
+                            warn(`StorageLoc fetch for ${plant.plantCode} failed: ${e.message}`);
+                        }
+                    }
+                    if (tanks.length) {
+                        await this.db.run(INSERT.into('refinery.massbalance.Tanks').entries(tanks));
+                        log(`Synced ${tanks.length} storage locations as tanks from S/4 HANA.`);
+                    } else {
+                        warn('No storage locations found in S/4 HANA.');
+                    }
+                }
+            } else {
+                log(`Tanks already loaded (${existing.length}).`);
+            }
+        } catch (err) {
+            warn(`Tank sync failed: ${err.message}`);
+        }
     }
 
     async _auditIngest(run, results) {

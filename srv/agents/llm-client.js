@@ -1,22 +1,25 @@
 'use strict';
 
 /**
- * LLM Client — SAP AI Core (primary) + Anthropic Claude (fallback)
+ * LLM Client — SAP AI Core via BTP destination (primary) + env vars (fallback) + Anthropic
  *
  * Priority order:
- *   1. SAP AI Core  — when AICORE_CLIENT_ID + AICORE_CLIENT_SECRET are set
- *   2. Anthropic    — when ANTHROPIC_API_KEY is set
- *   3. null         — caller falls back to heuristics
+ *   1. SAP AI Core via BTP destination — when AICORE_DESTINATION is set (e.g. "aicore")
+ *   2. SAP AI Core via env vars        — when AICORE_CLIENT_ID + AICORE_CLIENT_SECRET are set
+ *   3. Anthropic                       — when ANTHROPIC_API_KEY is set
+ *   4. null                            — caller falls back to heuristics
  *
- * SAP AI Core uses the OpenAI-compatible chat completions endpoint.
- * Set these environment variables to activate it:
- *   AICORE_CLIENT_ID       — from AI Core service key
- *   AICORE_CLIENT_SECRET   — from AI Core service key
- *   AICORE_TOKEN_URL       — XSUAA token URL from service key
- *   AICORE_API_URL         — e.g. https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com
+ * For BTP destination mode, set:
+ *   AICORE_DESTINATION     — BTP destination name (default: "aicore")
  *   AICORE_DEPLOYMENT_ID   — deployment ID of the model to use
  *   AICORE_RESOURCE_GROUP  — default: "default"
+ *   AICORE_API_FORMAT      — openai | bedrock | anthropic  (default: openai)
+ *
+ * For env var mode, additionally set:
+ *   AICORE_CLIENT_ID / AICORE_CLIENT_SECRET / AICORE_TOKEN_URL / AICORE_API_URL
  */
+
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 
 class LLMClient {
 
@@ -26,14 +29,13 @@ class LLMClient {
     }
 
     get provider() {
+        if (process.env.AICORE_DESTINATION) return 'aicore-dest';
         if (process.env.AICORE_CLIENT_ID && process.env.AICORE_CLIENT_SECRET &&
             process.env.AICORE_TOKEN_URL && process.env.AICORE_API_URL &&
             process.env.AICORE_DEPLOYMENT_ID) {
             return 'aicore';
         }
-        if (process.env.ANTHROPIC_API_KEY) {
-            return 'anthropic';
-        }
+        if (process.env.ANTHROPIC_API_KEY) return 'anthropic';
         return 'none';
     }
 
@@ -43,6 +45,9 @@ class LLMClient {
      */
     async complete(systemPrompt, userPrompt, maxTokens = 800) {
         try {
+            if (this.provider === 'aicore-dest') {
+                return await this._callAICoreDestination(systemPrompt, userPrompt, maxTokens);
+            }
             if (this.provider === 'aicore') {
                 return await this._callAICore(systemPrompt, userPrompt, maxTokens);
             }
@@ -55,7 +60,52 @@ class LLMClient {
         return null;
     }
 
-    // ─── SAP AI Core ──────────────────────────────────────────────────
+    // ─── SAP AI Core via BTP destination ──────────────────────────────
+    async _callAICoreDestination(systemPrompt, userPrompt, maxTokens) {
+        const destName = process.env.AICORE_DESTINATION;
+        const deplId   = process.env.AICORE_DEPLOYMENT_ID;
+        const resGroup = process.env.AICORE_RESOURCE_GROUP || 'default';
+        const fmt      = (process.env.AICORE_API_FORMAT || 'openai').toLowerCase();
+
+        const baseUrl  = `/v2/inference/deployments/${deplId}`;
+        const headers  = { 'AI-Resource-Group': resGroup, 'Content-Type': 'application/json' };
+
+        if (fmt === 'bedrock') {
+            const res = await executeHttpRequest(
+                { destinationName: destName },
+                { method: 'POST', url: `${baseUrl}/invoke`, headers,
+                  data: { anthropic_version: 'bedrock-2023-05-31', max_tokens: maxTokens,
+                          temperature: 0.3, system: systemPrompt,
+                          messages: [{ role: 'user', content: userPrompt }] } }
+            );
+            if (res.data?.error) throw new Error(`AI Core: ${JSON.stringify(res.data.error)}`);
+            return res.data.content[0].text;
+        }
+
+        if (fmt === 'anthropic') {
+            const res = await executeHttpRequest(
+                { destinationName: destName },
+                { method: 'POST', url: `${baseUrl}/messages`, headers,
+                  data: { max_tokens: maxTokens, temperature: 0.3, system: systemPrompt,
+                          messages: [{ role: 'user', content: userPrompt }] } }
+            );
+            if (res.data?.error) throw new Error(`AI Core: ${JSON.stringify(res.data.error)}`);
+            return res.data.content[0].text;
+        }
+
+        // Default: OpenAI-compatible
+        const res = await executeHttpRequest(
+            { destinationName: destName },
+            { method: 'POST', url: `${baseUrl}/chat/completions`, headers,
+              data: { messages: [{ role: 'system', content: systemPrompt },
+                                 { role: 'user',   content: userPrompt   }],
+                      max_tokens: maxTokens, temperature: 0.3 } }
+        );
+        if (res.data?.error) throw new Error(`AI Core: ${JSON.stringify(res.data.error)}`);
+        return res.data.choices[0].message.content;
+    }
+
+    // ─── SAP AI Core via env vars (legacy / local dev) ─────────────────
     // AICORE_API_FORMAT=openai   → /chat/completions (gpt-4o, gpt-4.1, …)
     // AICORE_API_FORMAT=bedrock  → /invoke with Bedrock format (claude via AI Core)
     // AICORE_API_FORMAT=anthropic→ /messages with Anthropic format (legacy)

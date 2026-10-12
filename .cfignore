@@ -1,0 +1,27 @@
+# CF push exclusions — keeps the uploaded package small and safe
+
+node_modules/
+.git/
+.gitignore
+
+# Secrets — never push to CF (use cf set-env instead)
+.env
+.env.*
+.env.local
+
+# Local DB files — CF recreates from seed on first boot
+*.db
+*.db-wal
+*.db-shm
+/data/
+
+# Docker — not needed on CF
+Dockerfile
+docker-compose.yml
+
+# Dev tooling
+*.log
+.cds-snap/
+.cds-services.json
+gen/
+scripts/

@@ -77,8 +77,13 @@ class CalculationReconciliationAgent {
                 const consumption = this._sumByCategory(tankMovements, 'CONSUMPTION');
                 const blending    = this._sumByCategory(tankMovements, 'BLENDING');
 
-                // Closing = Opening + Receipts − Issues − Consumption ± Transfers ± Adjustments
-                const openingStock = parseFloat((Math.random() * 10000 + 1000).toFixed(3));
+                // Opening = prior period's closing book balance for this tank/material (0 on first run)
+                const priorLine = await this.db.run(
+                    SELECT.one('closingBook').from('refinery.massbalance.MassBalanceLine')
+                        .where({ tank_ID: tank.ID, material_ID: material.ID })
+                        .orderBy({ createdAt: 'desc' })
+                );
+                const openingStock = parseFloat(priorLine?.closingBook || 0);
                 const closingBook  = parseFloat((
                     openingStock + receipts - issues - consumption + transfers + production + blending
                 ).toFixed(3));
@@ -88,7 +93,8 @@ class CalculationReconciliationAgent {
                 const bk      = bookStock.find(b => b.tank_ID === tank.ID && b.material_ID === material.ID);
 
                 const closingPhysical = physInv?.quantityMT ??
-                    parseFloat((closingBook * (1 + (Math.random() * 0.010 - 0.003))).toFixed(3));
+                    bk?.unrestricted ??
+                    closingBook;
 
                 const variance    = parseFloat((closingPhysical - closingBook).toFixed(3));
                 const variancePct = closingBook !== 0

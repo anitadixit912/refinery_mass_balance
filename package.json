@@ -13,7 +13,8 @@
     "express": "^4",
     "@sap-ai-sdk/ai-api": "^2",
     "@sap-ai-sdk/orchestration": "^2",
-    "uuid": "^11"
+    "uuid": "^11",
+    "@sap-cloud-sdk/http-client": "^4"
   },
   "scripts": {
     "start": "cds-serve",
@@ -25,7 +26,7 @@
       "db": {
         "kind": "sqlite",
         "credentials": {
-          "url": "/app/data/massbalance.db"
+          "url": "./data/massbalance.db"
         }
       }
     }
