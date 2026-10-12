@@ -97,8 +97,12 @@ class CalculationReconciliationAgent {
                     closingBook;
 
                 const variance    = parseFloat((closingPhysical - closingBook).toFixed(3));
+                // When closingBook=0 but physical stock exists, treat as 100% variance
+                // (entire physical quantity is unaccounted for in the balance).
                 const variancePct = closingBook !== 0
                     ? parseFloat((variance / closingBook * 100).toFixed(4))
+                    : closingPhysical !== 0
+                    ? 100.0
                     : 0;
 
                 await this.db.run(
@@ -208,9 +212,11 @@ class CalculationReconciliationAgent {
         const counts = { INFO: 0, ADVISORY: 0, WARNING: 0, CRITICAL: 0 };
 
         for (const line of lines) {
-            if (!line.variancePct) continue;
+            const absVarianceMT  = Math.abs(line.variance || 0);
+            const variancePctRaw = line.variancePct != null ? line.variancePct : 0;
+            if (absVarianceMT === 0 && variancePctRaw === 0) continue;
 
-            const absVariance = Math.abs(line.variancePct) / 100;  // fraction
+            const absVariance = Math.abs(variancePctRaw) / 100;  // fraction
 
             // Find the most specific applicable tolerance (TANK > PLANT > REFINERY)
             const tol = this._findTolerance(tolerances, line, run.periodType);

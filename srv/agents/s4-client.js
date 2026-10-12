@@ -115,37 +115,50 @@ class S4Client {
     }
 
     // ── MOV domain — API_MATERIAL_DOCUMENT_SRV ─────────────────────────
+    // PostingDate lives on A_MaterialDocumentHeader, not on items.
+    // Filter by date on the header, expand items, then filter items by Plant.
     async getMovements(plantCode, period) {
         const { startDate, endDate } = _periodDates(period);
         const filter = _fEncode(
-            `Plant eq '${plantCode}' and PostingDate ge datetime'${startDate}T00:00:00' and PostingDate le datetime'${endDate}T23:59:59'`
+            `PostingDate ge datetime'${startDate}T00:00:00' and PostingDate le datetime'${endDate}T23:59:59'`
         );
         const res = await executeHttpRequest(
             { destinationName: DEST },
             {
                 method: 'GET',
-                url: `/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentItem?` +
+                url: `/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader?` +
                     _qs({
                         '$filter': filter,
-                        '$select': 'MaterialDocument,MaterialDocumentItem,Material,Plant,StorageLocation,GoodsMovementType,QuantityInEntryUnit,EntryUnit,PostingDate',
+                        '$expand': 'to_MaterialDocumentItem',
                         '$format': 'json',
-                        '$top'   : '5000',
+                        '$top'   : '1000',
                     }),
             }
         );
-        return (res.data?.d?.results || []).map(i => ({
-            docNumber       : i.MaterialDocument,
-            lineItem        : i.MaterialDocumentItem,
-            materialCode    : (i.Material || '').trim(),
-            plantCode       : i.Plant,
-            storageLocation : i.StorageLocation,
-            movementType    : i.GoodsMovementType,
-            movementCategory: MOV_TYPE_TO_CAT[i.GoodsMovementType] || 'GR',
-            postingDate     : i.PostingDate ? i.PostingDate.replace(/\/Date\((\d+)\)\//, (_, ms) =>
-                                new Date(Number(ms)).toISOString().split('T')[0]) : null,
-            quantity        : parseFloat(i.QuantityInEntryUnit) || 0,
-            uom             : i.EntryUnit || 'MT',
-        }));
+        const headers = res.data?.d?.results || [];
+        const items = [];
+        for (const hdr of headers) {
+            const postDate = hdr.PostingDate
+                ? hdr.PostingDate.replace(/\/Date\((\d+)\)\//, (_, ms) =>
+                    new Date(Number(ms)).toISOString().split('T')[0])
+                : null;
+            for (const item of (hdr.to_MaterialDocumentItem?.results || [])) {
+                if (item.Plant !== plantCode) continue;
+                items.push({
+                    docNumber       : hdr.MaterialDocument,
+                    lineItem        : item.MaterialDocumentItem,
+                    materialCode    : (item.Material || '').trim(),
+                    plantCode       : item.Plant,
+                    storageLocation : item.StorageLocation,
+                    movementType    : item.GoodsMovementType,
+                    movementCategory: MOV_TYPE_TO_CAT[item.GoodsMovementType] || 'GR',
+                    postingDate     : postDate,
+                    quantity        : parseFloat(item.QuantityInEntryUnit) || 0,
+                    uom             : item.EntryUnit || 'MT',
+                });
+            }
+        }
+        return items;
     }
 
     // ── BOOK domain — API_MATERIAL_STOCK_SRV ───────────────────────────
