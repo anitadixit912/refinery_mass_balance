@@ -240,7 +240,9 @@ class S4Client {
             inTransit      : 0,
             uom            : r.uom,
         }));
-    } — API_PHYSICAL_INVENTORY_DOC_SRV ───────────────────
+    }
+
+    // ── PHYS domain — API_PHYSICAL_INVENTORY_DOC_SRV ───────────────────
     async getPhysicalInventory(plantCode, period) {
         const { fiscalYear } = _periodDates(period);
         const res = await executeHttpRequest(
