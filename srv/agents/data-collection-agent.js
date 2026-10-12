@@ -325,12 +325,14 @@ class DataCollectionAgent {
         // Plants
         try {
             const existing = await this.db.run(SELECT.from('refinery.massbalance.Plants'));
+            const existingCodes = new Set(existing.map(p => p.plantCode));
             if (existing.length === 0) {
                 log('Plants table empty — fetching from S/4 HANA...');
                 const s4Plants = await s4Client.getPlants();
-                if (s4Plants.length) {
+                const newPlants = s4Plants.filter(p => !existingCodes.has(p.plantCode));
+                if (newPlants.length) {
                     await this.db.run(INSERT.into('refinery.massbalance.Plants').entries(
-                        s4Plants.map(p => ({
+                        newPlants.map(p => ({
                             ID       : uuidv4(),
                             plantCode: p.plantCode,
                             plantName: p.plantName,
@@ -339,9 +341,9 @@ class DataCollectionAgent {
                             isActive : true,
                         }))
                     ));
-                    log(`Synced ${s4Plants.length} plants from S/4 HANA.`);
+                    log(`Synced ${newPlants.length} plants from S/4 HANA.`);
                 } else {
-                    warn('No plants returned from S/4 HANA.');
+                    warn('No new plants to add from S/4 HANA.');
                 }
             } else {
                 log(`Plants already loaded (${existing.length}).`);
@@ -353,12 +355,14 @@ class DataCollectionAgent {
         // Materials
         try {
             const existing = await this.db.run(SELECT.from('refinery.massbalance.Materials'));
+            const existingCodes = new Set(existing.map(m => m.materialCode));
             if (existing.length === 0) {
                 log('Materials table empty — fetching from S/4 HANA...');
                 const s4Materials = await s4Client.getMaterials();
-                if (s4Materials.length) {
+                const newMats = s4Materials.filter(m => !existingCodes.has(m.materialCode));
+                if (newMats.length) {
                     await this.db.run(INSERT.into('refinery.massbalance.Materials').entries(
-                        s4Materials.map(m => ({
+                        newMats.map(m => ({
                             ID           : uuidv4(),
                             materialCode : m.materialCode,
                             materialDesc : m.materialDesc,
@@ -369,9 +373,9 @@ class DataCollectionAgent {
                             isActive     : true,
                         }))
                     ));
-                    log(`Synced ${s4Materials.length} materials from S/4 HANA.`);
+                    log(`Synced ${newMats.length} materials from S/4 HANA.`);
                 } else {
-                    warn('No materials returned from S/4 HANA.');
+                    warn('No new materials to add from S/4 HANA.');
                 }
             } else {
                 log(`Materials already loaded (${existing.length}).`);
@@ -383,6 +387,7 @@ class DataCollectionAgent {
         // Tanks — derived from Storage Locations per plant
         try {
             const existing = await this.db.run(SELECT.from('refinery.massbalance.Tanks'));
+            const existingTankIds = new Set(existing.map(t => t.tankId));
             if (existing.length === 0) {
                 const plants    = await this.db.run(SELECT.from('refinery.massbalance.Plants').where({ isActive: true }));
                 const materials = await this.db.run(SELECT.from('refinery.massbalance.Materials').where({ isActive: true }));
@@ -393,9 +398,11 @@ class DataCollectionAgent {
                         try {
                             const slocs = await s4Client.getStorageLocations(plant.plantCode);
                             for (const sl of slocs) {
+                                const tid = `${plant.plantCode}-${sl.storageLocation}`;
+                                if (existingTankIds.has(tid)) continue;
                                 tanks.push({
                                     ID             : uuidv4(),
-                                    tankId         : `${plant.plantCode}-${sl.storageLocation}`,
+                                    tankId         : tid,
                                     tankName       : `${sl.storageLocation} (${plant.plantCode})`,
                                     plant_ID       : plant.ID,
                                     material_ID    : materials[0].ID,

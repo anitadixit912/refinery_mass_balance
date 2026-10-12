@@ -69,7 +69,7 @@ class S4Client {
                 params: { '$select': 'Plant', '$format': 'json', '$top': '5000' },
             }
         );
-        const codes = [...new Set((res.data?.d?.results || []).map(r => r.Plant).filter(Boolean))];
+        const codes = [...new Set((res.data?.d?.results || []).map(r => (r.Plant || '').trim()).filter(Boolean))];
         return codes.map(c => ({ plantCode: c, plantName: c, country: '', region: '' }));
     }
 
