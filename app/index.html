@@ -268,7 +268,7 @@ sap.ui.getCore().attachInit(function () {
         (d.value || []).forEach(function(p) {
           oPlantSel.addItem(new sap.ui.core.ListItem({
             key:  p.ID,
-            text: p.plantCode + " – " + p.plantName
+            text: p.plantName && p.plantName !== p.plantCode ? p.plantCode + " – " + p.plantName : p.plantCode
           }));
         });
         oTriggerDialog.setBusy(false);
