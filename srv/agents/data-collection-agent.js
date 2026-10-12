@@ -290,7 +290,11 @@ class DataCollectionAgent {
         const matByCode  = Object.fromEntries(materials.map(m => [m.materialCode.trim(), m]));
 
         const s4Items = await s4Client.getBookStock(plantCode);
-        if (!s4Items.length) return;
+        console.log(`[DataCollectionAgent] Book stock from S/4 plant=${plantCode}: ${s4Items.length} entries`);
+        if (!s4Items.length) {
+            console.warn(`[DataCollectionAgent] No book stock data for plant ${plantCode} — BookStockSnapshot will be empty for run ${run.runId}`);
+            return;
+        }
 
         const entries = s4Items.map(i => {
             const tank         = tankBySLoc[i.storageLocation] || tanks[0];
@@ -314,6 +318,7 @@ class DataCollectionAgent {
                 isPeriodClose   : run.periodType === 'MONTHLY',
             };
         });
+        console.log(`[DataCollectionAgent] Inserting ${entries.length} BookStockSnapshots for run ${run.runId}, plant=${plantCode}`);
         await this.db.run(INSERT.into('refinery.massbalance.BookStockSnapshot').entries(entries));
     }
 

@@ -90,7 +90,10 @@ class CalculationReconciliationAgent {
 
                 // Physical stock from dip gauge (after density/temp corrections)
                 const physInv = physInvs.find(p => p.tank_ID === tank.ID);
-                const bk      = bookStock.find(b => b.tank_ID === tank.ID && b.material_ID === material.ID);
+                // Exact match preferred; fall back to any book stock entry for this tank
+                // (storage locations from stock API vs movement docs may differ in SAP)
+                const bk = bookStock.find(b => b.tank_ID === tank.ID && b.material_ID === material.ID)
+                    || bookStock.find(b => b.tank_ID === tank.ID);
 
                 const closingPhysical = physInv?.quantityMT ??
                     bk?.unrestricted ??

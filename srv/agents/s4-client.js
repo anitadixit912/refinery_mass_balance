@@ -215,6 +215,7 @@ class S4Client {
             }
         );
         const items = res.data?.d?.results || [];
+        console.log(`[S4Client] _deriveBookStockFromMovements plant=${plantCode}: ${items.length} movement items`);
         // Aggregate net quantity per material+storageLocation (GR positive, GI negative)
         const netMap = {};
         for (const i of items) {
@@ -227,7 +228,9 @@ class S4Client {
             if (!netMap[key]) netMap[key] = { materialCode: mat, storageLocation: sloc, uom: i.EntryUnit || 'MT', net: 0 };
             netMap[key].net += sign * qty;
         }
-        return Object.values(netMap).map(r => ({
+        const netEntries = Object.values(netMap);
+        console.log(`[S4Client] Derived ${netEntries.length} net book stock positions for plant=${plantCode}`);
+        return netEntries.map(r => ({
             materialCode   : r.materialCode,
             plantCode,
             storageLocation: r.storageLocation,
@@ -237,9 +240,7 @@ class S4Client {
             inTransit      : 0,
             uom            : r.uom,
         }));
-    }
-
-    // ── PHYS domain — API_PHYSICAL_INVENTORY_DOC_SRV ───────────────────
+    } — API_PHYSICAL_INVENTORY_DOC_SRV ───────────────────
     async getPhysicalInventory(plantCode, period) {
         const { fiscalYear } = _periodDates(period);
         const res = await executeHttpRequest(
