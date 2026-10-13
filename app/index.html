@@ -83,8 +83,33 @@ sap.ui.getCore().attachInit(function () {
     runs: [], exceptions: [], approvals: [], plants: [], materials: [], tolerances: [],
     kpi: { totalRuns: 0, criticalExceptions: 0, pendingApprovals: 0, balanceStatus: "—" },
     selectedRunId: null,
-    busy: false
+    busy: false,
+    s4WebGuiUrl: '',
+    s4Client: '650'
   });
+
+  // Fetch app config (S4 Web GUI URL, client) from backend once on init.
+  fetch('/config').then(function(r){ return r.json(); }).then(function(cfg){
+    oModel.setProperty('/s4WebGuiUrl', cfg.s4WebGuiUrl || '');
+    oModel.setProperty('/s4Client',    cfg.s4Client    || '650');
+  }).catch(function(){});
+
+  function s4MaterialUrl(materialCode) {
+    var base   = oModel.getProperty('/s4WebGuiUrl');
+    var client = oModel.getProperty('/s4Client');
+    if (!base || !materialCode) return null;
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MM03' +
+           '&RMMG1-MATNR=' + encodeURIComponent(materialCode) +
+           '&sap-client='  + encodeURIComponent(client);
+  }
+
+  function s4PlantUrl(plantCode) {
+    var base   = oModel.getProperty('/s4WebGuiUrl');
+    var client = oModel.getProperty('/s4Client');
+    if (!base || !plantCode) return null;
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=OX10' +
+           '&sap-client=' + encodeURIComponent(client);
+  }
 
   // ─── helpers ─────────────────────────────────────────────────────────────
   function odata(path) {
@@ -1058,6 +1083,12 @@ sap.ui.getCore().attachInit(function () {
       items: { path: "/plants", template: new sap.m.ObjectListItem({
         title: "{plantCode}",
         intro: "{country}",
+        type: { path: "/s4WebGuiUrl", formatter: function(u){ return u ? sap.m.ListType.Navigation : sap.m.ListType.Inactive; } },
+        press: function(e) {
+          var ctx = e.getSource().getBindingContext();
+          var url = s4PlantUrl(ctx && ctx.getProperty("plantCode"));
+          if (url) window.open(url, "_blank");
+        },
         attributes: [
           new sap.m.ObjectAttribute({ title: "Name",   text: "{plantName}" }),
           new sap.m.ObjectAttribute({ title: "Region", text: "{region}" })
@@ -1070,6 +1101,12 @@ sap.ui.getCore().attachInit(function () {
       items: { path: "/materials", template: new sap.m.ObjectListItem({
         title: "{materialCode}",
         intro: "{productGroup}",
+        type: { path: "/s4WebGuiUrl", formatter: function(u){ return u ? sap.m.ListType.Navigation : sap.m.ListType.Inactive; } },
+        press: function(e) {
+          var ctx = e.getSource().getBindingContext();
+          var url = s4MaterialUrl(ctx && ctx.getProperty("materialCode"));
+          if (url) window.open(url, "_blank");
+        },
         attributes: [
           new sap.m.ObjectAttribute({ title: "Description", text: "{materialDesc}" }),
           new sap.m.ObjectAttribute({ title: "Base UOM",    text: "{baseUom}" }),
