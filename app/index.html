@@ -991,7 +991,7 @@ sap.ui.getCore().attachInit(function () {
               state: { path: "sapDocNumber", formatter: function(d){ return d ? "Success" : "None"; } },
               icon: { path: "sapDocNumber", formatter: function(d){ return d ? "sap-icon://document" : ""; } }
             }),
-            new sap.m.Text({ text: "{proposedAction}", wrapping: false }),
+            new sap.m.ExpandableText({ text: "{proposedAction}", maxCharacters: 120 }),
             new sap.m.Text({ text: { path: "requestedAt", formatter: function(d){ return d ? new Date(d).toLocaleDateString() : "—"; } } }),
             new sap.m.HBox({
               items: [
