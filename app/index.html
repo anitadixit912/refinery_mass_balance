@@ -116,10 +116,14 @@ sap.ui.getCore().attachInit(function () {
     var client = oModel.getProperty('/s4Client');
     if (!base || !docNumber) return null;
     var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
-    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MB03' +
-           '&RM07M-MBLNR=' + encodeURIComponent(docNumber) +
-           '&RM07M-MJAHR=' + year +
-           '&sap-client='  + encodeURIComponent(client);
+    // MB03 is obsolete in S/4HANA (SAP Note 2210569).
+    // Replacement: MIGO in display mode (A04) with material document reference (R02).
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MIGO' +
+           '&MIGO_MAIN-REWE=A04' +
+           '&MIGO_MAIN-WBSCL=R02' +
+           '&MIGO_MAIN-MBLNR=' + encodeURIComponent(docNumber) +
+           '&MIGO_MAIN-MJAHR=' + year +
+           '&sap-client='      + encodeURIComponent(client);
   }
 
   // ─── helpers ─────────────────────────────────────────────────────────────
