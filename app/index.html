@@ -1116,9 +1116,111 @@ sap.ui.getCore().attachInit(function () {
             new sap.m.VBox({ width: "460px", items: [oMaterials] }).addStyleClass("sapUiSmallMarginEnd"),
             new sap.m.VBox({ width: "100%", items: [oTolerance] })
           ]
-        })
+        }),
+        buildSecurityPanel()
       ]
     });
+  }
+
+  // ─── SECURITY COMPLIANCE PANEL ──────────────────────────────────────────
+  function buildSecurityPanel() {
+    var checks = [
+      // Critical
+      { group: "Authentication & Access",   label: "XSUAA Authentication",             status: "OPEN",   severity: "Error",   detail: "auth:dummy active — XSUAA + approuter not yet configured" },
+      { group: "Authentication & Access",   label: "Approuter / Login Gate",            status: "OPEN",   severity: "Error",   detail: "No approuter in manifest.yml — endpoints are world-accessible" },
+      { group: "Authentication & Access",   label: "Service-level @requires guard",     status: "OPEN",   severity: "Error",   detail: "MassBalanceService has no @requires annotation" },
+      // Medium — FIXED
+      { group: "Input Validation",          label: "Period parameter format check",     status: "FIXED",  severity: "Success", detail: "Regex /^\\d{4}-\\d{2}(-\\d{2})?$/ enforced in triggerRun & runFullPipeline" },
+      { group: "Input Validation",          label: "periodType allowlist",              status: "FIXED",  severity: "Success", detail: "Only DAILY / MONTHLY accepted; 400 returned for any other value" },
+      { group: "Input Validation",          label: "rootCauseCategory allowlist",       status: "FIXED",  severity: "Success", detail: "MC, TX, MD, TF, PL, SY only; validated before DB write" },
+      { group: "Input Validation",          label: "priority allowlist",                status: "FIXED",  severity: "Success", detail: "URGENT, HIGH, MEDIUM, LOW only" },
+      { group: "Production Dependencies",   label: "@sap/cds-dk in devDependencies",    status: "FIXED",  severity: "Success", detail: "Moved from dependencies — no longer shipped in production bundle" },
+      // Low — FIXED
+      { group: "Logging & Secrets",         label: "Token error log sanitization",      status: "FIXED",  severity: "Success", detail: "AI Core OAuth error logged as code only — full response body suppressed" },
+      { group: "Logging & Secrets",         label: "Free-text payload size limit",      status: "FIXED",  severity: "Success", detail: "narrative, proposedAction, comments capped at 2000 chars" },
+      { group: "Logging & Secrets",         label: "No secrets in source code",         status: "OK",     severity: "Success", detail: "All credentials via CF env vars (cf set-env) — none in code or manifest" },
+      // Always OK
+      { group: "Transport & Infrastructure","label": "HTTPS enforced",                  status: "OK",     severity: "Success", detail: "CF Gorouter terminates TLS — HTTP not reachable externally" },
+      { group: "Transport & Infrastructure","label": "CORS — not permissive",           status: "OK",     severity: "Success", detail: "No custom CORS headers — UI served from same origin as API" },
+      { group: "Data Access",               label: "SQL injection prevention",          status: "OK",     severity: "Success", detail: "All local DB queries use CAP ORM parameterized fluent API" },
+      { group: "Data Access",               label: "S/4 filter encoding",               status: "OK",     severity: "Success", detail: "_fEncode encodes spaces and single-quotes; period validated by regex before use" }
+    ];
+
+    var groups = {};
+    checks.forEach(function(c) {
+      if (!groups[c.group]) groups[c.group] = [];
+      groups[c.group].push(c);
+    });
+
+    var openCount  = checks.filter(function(c){ return c.status === "OPEN";  }).length;
+    var fixedCount = checks.filter(function(c){ return c.status === "FIXED"; }).length;
+    var okCount    = checks.filter(function(c){ return c.status === "OK";    }).length;
+
+    // Summary strip
+    var oSummary = new sap.m.FlexBox({
+      wrap: sap.m.FlexWrap.Wrap,
+      items: [
+        _secKpi("Open (Action Required)", openCount,  "sap-icon://alert",  openCount  > 0 ? "#bb0000" : "#188918"),
+        _secKpi("Fixed This Release",      fixedCount, "sap-icon://accept", "#188918"),
+        _secKpi("Compliant",               okCount,    "sap-icon://sys-enter-2", "#0070f2")
+      ]
+    }).addStyleClass("sapUiSmallMarginBottom");
+
+    // Build one list per group
+    var groupPanels = Object.keys(groups).map(function(grp) {
+      var oList = new sap.m.List({ showNoData: false });
+      groups[grp].forEach(function(c) {
+        var icon = c.status === "OPEN"  ? "sap-icon://alert"    :
+                   c.status === "FIXED" ? "sap-icon://accept"   : "sap-icon://sys-enter-2";
+        var color= c.status === "OPEN"  ? "#bb0000" :
+                   c.status === "FIXED" ? "#188918" : "#0070f2";
+        oList.addItem(new sap.m.CustomListItem({
+          content: [ new sap.m.FlexBox({
+            alignItems: sap.m.FlexAlignItems.Center,
+            items: [
+              new sap.ui.core.Icon({ src: icon, color: color, size: "1rem" })
+                .addStyleClass("sapUiSmallMarginEnd"),
+              new sap.m.VBox({ items: [
+                new sap.m.Text({ text: c.label, wrapping: false }).addStyleClass("sapMTextBold"),
+                new sap.m.Text({ text: c.detail, wrapping: true })
+                  .addStyleClass("sapUiTinyMarginTop")
+              ]}),
+              new sap.m.ToolbarSpacer(),
+              new sap.m.ObjectStatus({
+                text : c.status,
+                state: c.severity
+              }).addStyleClass("sapUiSmallMarginBegin")
+            ]
+          }).addStyleClass("sapUiSmallMarginBeginEnd sapUiTinyMarginTopBottom") ]
+        }));
+      });
+      return new sap.m.Panel({
+        headerText: grp,
+        expandable: true,
+        expanded: true,
+        content: [ oList ]
+      }).addStyleClass("sapUiSmallMarginBottom");
+    });
+
+    return new sap.m.Panel({
+      headerText: "Security Compliance",
+      expandable: true,
+      expanded: true,
+      content: [ new sap.m.VBox({ items: [oSummary].concat(groupPanels) }) ]
+    }).addStyleClass("sapUiMediumMarginTop");
+  }
+
+  function _secKpi(label, value, icon, color) {
+    return new sap.m.Panel({ content: [
+      new sap.m.VBox({
+        alignItems: sap.m.FlexAlignItems.Center,
+        items: [
+          new sap.ui.core.Icon({ src: icon, color: color, size: "1.5rem" }).addStyleClass("sapUiTinyMarginBottom"),
+          new sap.m.Title({ text: String(value), level: sap.ui.core.TitleLevel.H2 }),
+          new sap.m.Text({ text: label })
+        ]
+      }).addStyleClass("sapUiSmallMarginBeginEnd sapUiSmallMarginTopBottom")
+    ]}).addStyleClass("sapUiSmallMarginEnd kpi-card");
   }
 
   // ─── PIPELINE TAB ────────────────────────────────────────────────────────
