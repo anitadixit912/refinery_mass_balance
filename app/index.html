@@ -357,7 +357,7 @@ sap.ui.getCore().attachInit(function () {
     "checkTolerances":          { label: "Next: Investigate (Step 06) →",  key: "pipeline"   },
     "investigateAndClassify":   { label: "View Exceptions →",              key: "exceptions" },
     "generateExceptionReport":  { label: "View Exceptions →",              key: "exceptions" },
-    "generateExecutiveSummary": { label: "View Dashboard →",               key: "dashboard"  }
+    "generateExecutiveSummary": { label: "View Run Summary →",              key: "detail"     }
   };
 
   function runAction(path, runId, label) {
@@ -376,7 +376,11 @@ sap.ui.getCore().attachInit(function () {
             stepRef.btn.setText(nav.label);
             stepRef.btn.setType(sap.m.ButtonType.Accept);
             stepRef.btn.setIcon("sap-icon://navigation-right-arrow");
-            stepRef.btn.attachPress(function() { oIconTabBar.setSelectedKey(nav.key); loadAll(); });
+            if (nav.key === "detail") {
+              stepRef.btn.attachPress(function() { openRunDetail(runId); });
+            } else {
+              stepRef.btn.attachPress(function() { oIconTabBar.setSelectedKey(nav.key); loadAll(); });
+            }
           }
         }
         if (r && r.error) {
@@ -387,11 +391,15 @@ sap.ui.getCore().attachInit(function () {
           if (nav2 && nav2.key === "exceptions") {
             _exceptionsRunFilter = runId;
           }
+          var navCb = nav2 ? (nav2.key === "detail"
+            ? function() { openRunDetail(runId); }
+            : function() { oIconTabBar.setSelectedKey(nav2.key); loadAll(); })
+            : null;
           showResultDialog(
             "Step Complete — " + label,
             formatAgentResult(label, r),
             nav2 ? nav2.label : null,
-            nav2 ? function() { oIconTabBar.setSelectedKey(nav2.key); loadAll(); } : null
+            navCb
           );
           loadAll();
         }
@@ -459,6 +467,171 @@ sap.ui.getCore().attachInit(function () {
     }).addStyleClass("sapUiSmallMarginTop sapUiSmallMarginBottom");
   }
 
+  // ─── RUN DETAIL DIALOG ──────────────────────────────────────────────────────
+  var _oRunDetailDialog = null;
+
+  function openRunDetail(runUUID, runIdStr) {
+    if (!runUUID) { sap.m.MessageToast.show("No run selected."); return; }
+    if (!_oRunDetailDialog) {
+      _oRunDetailDialog = new sap.m.Dialog({
+        contentWidth: "85%",
+        contentHeight: "80%",
+        resizable: true,
+        draggable: true,
+        stretch: sap.ui.Device.system.phone,
+        buttons: [
+          new sap.m.Button({ text: "Close", press: function() { _oRunDetailDialog.close(); } })
+        ]
+      });
+    }
+    _oRunDetailDialog.setTitle("Run: " + (runIdStr || runUUID));
+    _oRunDetailDialog.removeAllContent();
+    _oRunDetailDialog.addContent(new sap.m.VBox({
+      alignItems: sap.m.FlexAlignItems.Center,
+      justifyContent: sap.m.FlexJustifyContent.Center,
+      height: "200px",
+      items: [ new sap.m.BusyIndicator({ size: "2rem" }) ]
+    }));
+    _oRunDetailDialog.open();
+
+    var enc = encodeURIComponent(runUUID);
+    Promise.all([
+      fetch(BASE + "/MassBalanceLines?$filter=run_ID%20eq%20" + enc +
+            "&$expand=tank($select=tankId,tankName),material($select=materialCode)&$orderby=severity%20desc")
+        .then(function(r){ return r.json(); }),
+      fetch(BASE + "/Exceptions?$filter=run_ID%20eq%20" + enc +
+            "&$select=ID,exceptionId,severity,rootCauseCategory,varianceMT,variancePct,status")
+        .then(function(r){ return r.json(); }),
+      fetch(BASE + "/AuditLogs?$filter=run_ID%20eq%20" + enc + "&$orderby=timestamp%20asc")
+        .then(function(r){ return r.json(); })
+    ]).then(function(res) {
+      var lines = res[0].value || [];
+      var excs  = res[1].value || [];
+      var logs  = res[2].value || [];
+
+      // KPI summary
+      var totalVar  = lines.reduce(function(s,l){ return s + (parseFloat(l.variance)||0); }, 0);
+      var totalBook = lines.reduce(function(s,l){ return s + (parseFloat(l.closingBook)||0); }, 0);
+      var varPctNum = totalBook !== 0 ? (totalVar / totalBook * 100) : 0;
+      var varPctStr = totalBook !== 0 ? varPctNum.toFixed(4) + " %" : "—";
+      var nCrit = excs.filter(function(e){ return e.severity === "CRITICAL"; }).length;
+      var nWarn = excs.filter(function(e){ return e.severity === "WARNING"; }).length;
+
+      function chip(lbl, val, icon, color) {
+        return new sap.m.Panel({ content: [
+          new sap.m.VBox({
+            alignItems: sap.m.FlexAlignItems.Center,
+            items: [
+              new sap.ui.core.Icon({ src: icon, color: color, size: "1.5rem" }).addStyleClass("sapUiTinyMarginBottom"),
+              new sap.m.Title({ text: String(val), level: sap.ui.core.TitleLevel.H2 }),
+              new sap.m.Text({ text: lbl })
+            ]
+          }).addStyleClass("sapUiSmallMarginBeginEnd sapUiSmallMarginTopBottom")
+        ]}).addStyleClass("sapUiSmallMarginEnd kpi-card");
+      }
+      var oKpiRow = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap, items: [
+        chip("Balance Lines",     lines.length, "sap-icon://detail-view", "#0070f2"),
+        chip("Refinery Variance", varPctStr,    "sap-icon://measure",     Math.abs(varPctNum) > 0.1 ? "#bb0000" : "#188918"),
+        chip("Critical",          nCrit,        "sap-icon://alert",       nCrit > 0 ? "#bb0000" : "#188918"),
+        chip("Warning",           nWarn,        "sap-icon://warning2",    nWarn > 0 ? "#e9730c" : "#188918")
+      ]}).addStyleClass("sapUiSmallMarginBottom");
+
+      // Balance lines table
+      var oLinesTable = new sap.m.Table({
+        growing: true, growingThreshold: 10,
+        noDataText: "No balance lines calculated yet — run Steps 03–06 first.",
+        columns: [
+          new sap.m.Column({ header: new sap.m.Label({ text: "Tank" }) }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Material" }), minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Opening (MT)" }), hAlign: sap.ui.core.TextAlign.End }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Receipts" }),     hAlign: sap.ui.core.TextAlign.End, minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Issues" }),       hAlign: sap.ui.core.TextAlign.End, minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Closing Book" }), hAlign: sap.ui.core.TextAlign.End }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Closing Phys." }),hAlign: sap.ui.core.TextAlign.End }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Variance MT" }),  hAlign: sap.ui.core.TextAlign.End }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Severity" }) })
+        ]
+      });
+      lines.forEach(function(l) {
+        var fmt = function(v){ return v !== null && v !== undefined ? parseFloat(v).toFixed(3) : "0.000"; };
+        var tankName = (l.tank && (l.tank.tankName || l.tank.tankId)) || "—";
+        var matCode  = (l.material && l.material.materialCode) || "—";
+        var varNum   = parseFloat(l.variance) || 0;
+        oLinesTable.addItem(new sap.m.ColumnListItem({
+          highlight: { formatter: function(){ return statusState(l.severity); } },
+          cells: [
+            new sap.m.Text({ text: tankName }),
+            new sap.m.Text({ text: matCode }),
+            new sap.m.Text({ text: fmt(l.openingStock),    textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: fmt(l.receipts),        textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: fmt(l.issues),          textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: fmt(l.closingBook),     textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: fmt(l.closingPhysical), textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.ObjectStatus({
+              text: fmt(varNum) + " MT",
+              state: Math.abs(varNum) > 0.001 ? (varNum < 0 ? "Error" : "Warning") : "Success"
+            }),
+            new sap.m.ObjectStatus({ text: l.severity || "INFO", state: severityState(l.severity) })
+          ]
+        }));
+      });
+
+      // Exceptions table
+      var oExcTable = new sap.m.Table({
+        noDataText: "No exceptions for this run.",
+        columns: [
+          new sap.m.Column({ header: new sap.m.Label({ text: "Exception ID" }) }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Severity" }) }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Root Cause" }) }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Variance MT" }), hAlign: sap.ui.core.TextAlign.End }),
+          new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) })
+        ]
+      });
+      excs.forEach(function(e) {
+        oExcTable.addItem(new sap.m.ColumnListItem({
+          cells: [
+            new sap.m.Text({ text: e.exceptionId || "—" }),
+            new sap.m.ObjectStatus({ text: e.severity, state: severityState(e.severity) }),
+            new sap.m.Text({ text: e.rootCauseCategory || "—" }),
+            new sap.m.Text({ text: e.varianceMT ? parseFloat(e.varianceMT).toFixed(3) + " MT" : "—", textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.ObjectStatus({ text: e.status, state: statusState(e.status) })
+          ]
+        }));
+      });
+
+      // Audit log
+      var oAuditList = new sap.m.List({ noDataText: "No audit entries." });
+      logs.forEach(function(a) {
+        oAuditList.addItem(new sap.m.StandardListItem({
+          title: (a.agentStep || "") + ": " + (a.action || "").substring(0, 80),
+          description: a.timestamp ? new Date(a.timestamp).toLocaleString() : "",
+          icon: a.result === "SUCCESS" ? "sap-icon://accept" : a.result === "WARNING" ? "sap-icon://alert" : "sap-icon://error",
+          iconInset: false
+        }));
+      });
+
+      _oRunDetailDialog.removeAllContent();
+      _oRunDetailDialog.addContent(new sap.m.ScrollContainer({
+        vertical: true, horizontal: false, height: "100%",
+        content: [ new sap.m.VBox({ items: [
+          oKpiRow,
+          new sap.m.Title({ text: "Balance Lines", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginBottom"),
+          oLinesTable,
+          new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginTopBottom"),
+          oExcTable,
+          new sap.m.Panel({
+            headerText: "Audit Log",
+            expandable: true, expanded: false,
+            content: [ oAuditList ]
+          }).addStyleClass("sapUiSmallMarginTop")
+        ]})]
+      }));
+    }).catch(function(err) {
+      _oRunDetailDialog.removeAllContent();
+      _oRunDetailDialog.addContent(new sap.m.Text({ text: "Failed to load run details: " + err.message }));
+    });
+  }
+
   // ─── RUNS TABLE ──────────────────────────────────────────────────────────
   function buildRunsPage() {
     var oTable = new sap.m.Table({
@@ -478,7 +651,12 @@ sap.ui.getCore().attachInit(function () {
       items: {
         path: "/runs",
         template: new sap.m.ColumnListItem({
+          type: sap.m.ListType.Navigation,
           vAlign: sap.ui.core.VerticalAlign.Middle,
+          press: function(e) {
+            var ctx = e.getSource().getBindingContext();
+            if (ctx) openRunDetail(ctx.getProperty("ID"), ctx.getProperty("runId"));
+          },
           cells: [
             new sap.m.Text({ text: "{runId}" }),
             new sap.m.Text({ text: "{period}" }),
