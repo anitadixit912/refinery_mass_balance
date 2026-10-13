@@ -43,6 +43,10 @@ applications:
       # AICORE_DEPLOYMENT_ID:  set via cf set-env
       AICORE_API_FORMAT: bedrock
       AICORE_RESOURCE_GROUP: default
+      # S/4 HANA Web GUI base URL — browser-reachable address for deep-links (MM03, MB03, OX10).
+      # Must be reachable from the user's browser (VPN / intranet), NOT via BTP Cloud Connector.
+      S4H_WEBGUI_URL: https://10.236.250.15:44301
+      S4H_CLIENT: "650"
 
 # NOTE — SQLite on CF:
 #   CF containers are ephemeral. The SQLite DB (./data/massbalance.db) is
