@@ -8,7 +8,7 @@ DB=./data/massbalance.db
 if [ ! -f "$DB" ]; then
   echo "[start.sh] First boot — deploying schema and seed data to $DB"
   mkdir -p ./data
-  node ./node_modules/@sap/cds-dk/bin/cds.js deploy --to "sqlite:$DB"
+  node ./node_modules/@sap/cds/bin/deploy.js
   echo "[start.sh] Deploy complete."
 else
   echo "[start.sh] DB found at $DB — skipping deploy, keeping existing data."

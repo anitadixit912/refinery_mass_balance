@@ -578,7 +578,7 @@ sap.ui.getCore().attachInit(function () {
         var matCode  = (l.material && l.material.materialCode) || "—";
         var varNum   = parseFloat(l.variance) || 0;
         oLinesTable.addItem(new sap.m.ColumnListItem({
-          highlight: { formatter: function(){ return statusState(l.severity); } },
+          highlight: severityState(l.severity),
           cells: [
             new sap.m.Text({ text: tankName }),
             new sap.m.Text({ text: matCode }),
@@ -828,7 +828,7 @@ sap.ui.getCore().attachInit(function () {
       items: {
         path: "/exceptions",
         template: new sap.m.ColumnListItem({
-          highlight: { path: "severity", formatter: function(s){ return statusState(s); } },
+          highlight: { path: "severity", formatter: function(s){ return severityState(s); } },
           cells: [
             new sap.m.Text({ text: "{exceptionId}" }),
             new sap.m.ObjectStatus({
@@ -1053,8 +1053,8 @@ sap.ui.getCore().attachInit(function () {
         title: "{plantCode}",
         intro: "{country}",
         attributes: [
-          new sap.m.ObjectAttribute({ title: "Name",     text: "{plantName}" }),
-          new sap.m.ObjectAttribute({ title: "Timezone", text: "{timezone}" })
+          new sap.m.ObjectAttribute({ title: "Name",   text: "{plantName}" }),
+          new sap.m.ObjectAttribute({ title: "Region", text: "{region}" })
         ]
       })}
     });
@@ -1065,9 +1065,9 @@ sap.ui.getCore().attachInit(function () {
         title: "{materialCode}",
         intro: "{productGroup}",
         attributes: [
-          new sap.m.ObjectAttribute({ title: "Description", text: "{description}" }),
+          new sap.m.ObjectAttribute({ title: "Description", text: "{materialDesc}" }),
           new sap.m.ObjectAttribute({ title: "Base UOM",    text: "{baseUom}" }),
-          new sap.m.ObjectAttribute({ title: "Density",     text: { path: "densityFactor", formatter: function(d){ return d ? parseFloat(d).toFixed(4) + " MT/m³" : "—"; } } }),
+          new sap.m.ObjectAttribute({ title: "Density",     text: { path: "density", formatter: function(d){ return d ? parseFloat(d).toFixed(4) + " kg/L" : "—"; } } }),
           new sap.m.ObjectAttribute({ title: "API Gravity", text: { path: "apiGravity", formatter: function(v){ return v ? parseFloat(v).toFixed(1) + " °API" : "—"; } } })
         ]
       })}
