@@ -194,8 +194,25 @@ sap.ui.getCore().attachInit(function () {
     items: [
       new sap.ui.core.ListItem({ key:"DAILY",   text:"Daily" }),
       new sap.ui.core.ListItem({ key:"MONTHLY", text:"Monthly" })
-    ]
+    ],
+    change: function() {
+      var isMonthly = oPeriodType.getSelectedKey() === "MONTHLY";
+      var cur = oPeriod.getValue() || "";
+      if (isMonthly) {
+        oPeriod.setDisplayFormat("yyyy-MM");
+        oPeriod.setValueFormat("yyyy-MM");
+        if (cur.length > 7) oPeriod.setValue(cur.slice(0, 7));
+        oPeriodHint.setText("Format: YYYY-MM (e.g. 2026-09)");
+      } else {
+        oPeriod.setDisplayFormat("yyyy-MM-dd");
+        oPeriod.setValueFormat("yyyy-MM-dd");
+        if (cur.length === 7) oPeriod.setValue(cur + "-01");
+        oPeriodHint.setText("Format: YYYY-MM-DD (e.g. 2026-09-01)");
+      }
+    }
   });
+
+  var oPeriodHint = new sap.m.Text({ text: "Format: YYYY-MM-DD (e.g. 2026-09-01)" });
 
   var oPeriod = new sap.m.DatePicker({
     width: "100%", displayFormat: "yyyy-MM-dd", valueFormat: "yyyy-MM-dd",
@@ -214,7 +231,9 @@ sap.ui.getCore().attachInit(function () {
           new sap.m.Label({ text: "Period Type", required: true }),
           oPeriodType,
           new sap.m.Label({ text: "Period", required: true }),
-          oPeriod
+          oPeriod,
+          new sap.m.Label({ text: "" }),
+          oPeriodHint
         ]
       })
     ],
@@ -224,7 +243,9 @@ sap.ui.getCore().attachInit(function () {
       press: function() {
         var plantId = oPlantSel.getSelectedKey();
         var ptype   = oPeriodType.getSelectedKey();
-        var period  = oPeriod.getValue();
+        var rawPeriod = oPeriod.getValue();
+        // Monthly runs need YYYY-MM format; the DatePicker always returns YYYY-MM-DD
+        var period  = (ptype === 'MONTHLY' && rawPeriod.length > 7) ? rawPeriod.slice(0, 7) : rawPeriod;
         if (!plantId || !period) {
           sap.m.MessageToast.show("Please select a Plant and Period."); return;
         }
@@ -351,8 +372,8 @@ sap.ui.getCore().attachInit(function () {
   }
 
   var _stepNavMap = {
-    "validateData":             { label: "View Run Status →",              key: "runs"       },
-    "calculateBalance":         { label: "View Run Status →",              key: "runs"       },
+    "validateData":             { label: "View Run Detail →",              key: "detail"     },
+    "calculateBalance":         { label: "View Run Detail →",              key: "detail"     },
     "reconcileAndCompare":      { label: "Next: Check Tolerances (Step 05) →", key: "pipeline"  },
     "checkTolerances":          { label: "Next: Investigate (Step 06) →",  key: "pipeline"   },
     "investigateAndClassify":   { label: "View Exceptions →",              key: "exceptions" },
