@@ -113,20 +113,21 @@ sap.ui.getCore().attachInit(function () {
 
   function s4DocUrl(docNumber, approvedAt) {
     var base   = oModel.getProperty('/s4WebGuiUrl');
-    var client = oModel.getProperty('/s4Client');
+    var client = oModel.getProperty('/s4Client') || '650';
     if (!base || !docNumber) return null;
-    // Returns null — handled imperatively in the press handler (copy + open MIGO).
-    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MIGO&sap-client=' + encodeURIComponent(client);
+    var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
+    // MB03: Display Material Document — traditional Dynpro, supports URL parameter pre-fill.
+    // RM07M-MBLNR = document number, RM07M-MJAHR = fiscal year (initial screen fields).
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MB03' +
+           '&RM07M-MBLNR=' + encodeURIComponent(docNumber) +
+           '&RM07M-MJAHR=' + encodeURIComponent(year) +
+           '&sap-client='  + encodeURIComponent(client);
   }
 
   function openDocInS4(docNumber, approvedAt) {
     var url = s4DocUrl(docNumber, approvedAt);
     if (!url) return;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(docNumber).catch(function(){});
-    }
     window.open(url, '_blank');
-    sap.m.MessageToast.show('MIGO opened. Document ' + docNumber + ' copied to clipboard — paste into the Material Document field.', { duration: 5000 });
   }
 
   // ─── helpers ─────────────────────────────────────────────────────────────
@@ -566,11 +567,16 @@ sap.ui.getCore().attachInit(function () {
             "&$select=ID,exceptionId,severity,rootCauseCategory,varianceMT,variancePct,status")
         .then(function(r){ return r.json(); }),
       fetch(BASE + "/AuditLogs?$filter=run_ID%20eq%20" + enc + "&$orderby=timestamp%20asc")
+        .then(function(r){ return r.json(); }),
+      fetch(BASE + "/MassBalanceRuns(" + enc + ")" +
+            "?$select=balanceStatus,dataCompleteness,tanksReconciled,refineryVariancePct," +
+            "correctionsPosted,pendingApprovals,summaryNarrative,period,periodType,runStatus")
         .then(function(r){ return r.json(); })
     ]).then(function(res) {
       var lines = res[0].value || [];
       var excs  = res[1].value || [];
       var logs  = res[2].value || [];
+      var run   = res[3] && !res[3].error ? res[3] : {};
 
       // KPI summary
       var totalVar  = lines.reduce(function(s,l){ return s + (parseFloat(l.variance)||0); }, 0);
@@ -674,20 +680,69 @@ sap.ui.getCore().attachInit(function () {
       });
 
       _oRunDetailDialog.removeAllContent();
+
+      // Executive Summary panel (only when Step 10 has run)
+      var oSummaryPanel = null;
+      if (run.balanceStatus && run.balanceStatus !== 'PENDING') {
+        var bsState = run.balanceStatus === 'WITHIN_TOLERANCE' ? 'Success' : 'Error';
+        var bsIcon  = run.balanceStatus === 'WITHIN_TOLERANCE' ? 'sap-icon://sys-enter-2' : 'sap-icon://alert';
+        var kpiItems = [
+          { l: "Balance Status",    v: run.balanceStatus ? run.balanceStatus.replace(/_/g,' ') : "—", icon: bsIcon,                   color: run.balanceStatus === 'WITHIN_TOLERANCE' ? '#188918' : '#bb0000' },
+          { l: "Refinery Variance", v: run.refineryVariancePct != null ? parseFloat(run.refineryVariancePct).toFixed(4)+'%' : "—",   icon: 'sap-icon://measure',      color: Math.abs(parseFloat(run.refineryVariancePct)||0)>0.1?'#bb0000':'#188918' },
+          { l: "Data Completeness", v: run.dataCompleteness  != null ? parseFloat(run.dataCompleteness).toFixed(2)+'%'  : "—",       icon: 'sap-icon://detail-view',  color: '#0070f2' },
+          { l: "Tanks Reconciled",  v: run.tanksReconciled   != null ? String(run.tanksReconciled) : "0",                            icon: 'sap-icon://tank-gauge',   color: '#0070f2' },
+          { l: "Active Exceptions", v: String(excs.length),                                                                          icon: 'sap-icon://warning2',     color: excs.length > 0 ? '#e9730c' : '#188918' },
+          { l: "Pending Approvals", v: run.pendingApprovals  != null ? String(run.pendingApprovals) : "0",                          icon: 'sap-icon://task',         color: (run.pendingApprovals||0) > 0 ? '#bb0000' : '#188918' }
+        ];
+        var oSummaryKpis = new sap.m.FlexBox({ wrap: sap.m.FlexWrap.Wrap, items: kpiItems.map(function(k){
+          return new sap.m.Panel({ content: [
+            new sap.m.VBox({
+              alignItems: sap.m.FlexAlignItems.Center,
+              items: [
+                new sap.ui.core.Icon({ src: k.icon, color: k.color, size: '1.4rem' }).addStyleClass('sapUiTinyMarginBottom'),
+                new sap.m.Title({ text: k.v, level: sap.ui.core.TitleLevel.H3 }),
+                new sap.m.Text({ text: k.l })
+              ]
+            }).addStyleClass('sapUiSmallMarginBeginEnd sapUiTinyMarginTopBottom')
+          ]}).addStyleClass('sapUiSmallMarginEnd kpi-card');
+        })}).addStyleClass('sapUiSmallMarginBottom');
+
+        var oNarrativeItems = [ oSummaryKpis ];
+        if (run.summaryNarrative) {
+          oNarrativeItems.push(
+            new sap.m.Panel({
+              content: [
+                new sap.m.Text({ text: run.summaryNarrative, wrapping: true })
+                  .addStyleClass('sapUiSmallMargin')
+              ]
+            }).addStyleClass('sapUiSmallMarginBottom')
+          );
+        }
+        oSummaryPanel = new sap.m.Panel({
+          headerText: 'Executive Summary',
+          expandable: true, expanded: true,
+          content: [ new sap.m.VBox({ items: oNarrativeItems }) ]
+        }).addStyleClass('sapUiSmallMarginBottom');
+      }
+
+      var oDialogItems = [];
+      if (oSummaryPanel) oDialogItems.push(oSummaryPanel);
+      oDialogItems = oDialogItems.concat([
+        oKpiRow,
+        new sap.m.Title({ text: "Balance Lines", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginBottom"),
+        oLinesTable,
+        new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginTopBottom"),
+        oExcTable,
+        new sap.m.Panel({
+          headerText: "Audit Log",
+          expandable: true, expanded: false,
+          content: [ oAuditList ]
+        }).addStyleClass("sapUiSmallMarginTop")
+      ]);
+
       _oRunDetailDialog.addContent(new sap.m.ScrollContainer({
         vertical: true, horizontal: false, height: "100%",
-        content: [ new sap.m.VBox({ items: [
-          oKpiRow,
-          new sap.m.Title({ text: "Balance Lines", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginBottom"),
-          oLinesTable,
-          new sap.m.Title({ text: "Exceptions", level: sap.ui.core.TitleLevel.H3 }).addStyleClass("sapUiSmallMarginTopBottom"),
-          oExcTable,
-          new sap.m.Panel({
-            headerText: "Audit Log",
-            expandable: true, expanded: false,
-            content: [ oAuditList ]
-          }).addStyleClass("sapUiSmallMarginTop")
-        ]})]
+        content: [ new sap.m.VBox({ items: oDialogItems }) ]
       }));
     }).catch(function(err) {
       _oRunDetailDialog.removeAllContent();

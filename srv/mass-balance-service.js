@@ -270,6 +270,7 @@ module.exports = cds.service.impl(async function (srv) {
             balanceStatus      : result.balanceStatus,
             correctionsPosted  : result.correctionsPosted,
             pendingApprovals   : result.pendingApprovals,
+            summaryNarrative   : result.message,
         });
 
         await _setRunStatus(run.ID,

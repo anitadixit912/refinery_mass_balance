@@ -139,6 +139,7 @@ entity MassBalanceRun : cuid, managed {
     } default 'PENDING';
     correctionsPosted   : Integer default 0;
     pendingApprovals    : Integer default 0;
+    summaryNarrative    : LargeString;              // AI-generated management narrative (Step 10)
 
     // Triggered by
     triggerType         : String(20) enum {
