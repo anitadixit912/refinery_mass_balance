@@ -216,7 +216,8 @@ sap.ui.getCore().attachInit(function () {
 
   var oPeriod = new sap.m.DatePicker({
     width: "100%", displayFormat: "yyyy-MM-dd", valueFormat: "yyyy-MM-dd",
-    value: new Date().toISOString().slice(0,10)
+    value: new Date().toISOString().slice(0,10),
+    tooltip: "Daily: YYYY-MM-DD (e.g. 2026-09-01) | Monthly: YYYY-MM (e.g. 2026-09)"
   });
 
   var oTriggerDialog = new sap.m.Dialog({
@@ -231,9 +232,7 @@ sap.ui.getCore().attachInit(function () {
           new sap.m.Label({ text: "Period Type", required: true }),
           oPeriodType,
           new sap.m.Label({ text: "Period", required: true }),
-          oPeriod,
-          new sap.m.Label({ text: "" }),
-          oPeriodHint
+          oPeriod
         ]
       })
     ],
@@ -1184,8 +1183,7 @@ sap.ui.getCore().attachInit(function () {
                 new sap.m.Text({ text: c.label, wrapping: false }).addStyleClass("sapMTextBold"),
                 new sap.m.Text({ text: c.detail, wrapping: true })
                   .addStyleClass("sapUiTinyMarginTop")
-              ]}),
-              new sap.m.ToolbarSpacer(),
+              ]}).addStyleClass("sapUiContentPadding"),
               new sap.m.ObjectStatus({
                 text : c.status,
                 state: c.severity
