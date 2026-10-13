@@ -957,8 +957,9 @@ sap.ui.getCore().attachInit(function () {
         new sap.m.Column({ header: new sap.m.Label({ text: "Type" }) }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Priority" }) }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Status" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "Proposed Action" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "Requested" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "SAP Doc #" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Proposed Action" }), minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Requested" }), minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Actions" }) })
       ],
       items: {
@@ -984,6 +985,11 @@ sap.ui.getCore().attachInit(function () {
                 path: "approvalStatus",
                 formatter: function(s){ return {APPROVED:"Success",REJECTED:"Error",PENDING:"Warning"}[s] || "None"; }
               }
+            }),
+            new sap.m.ObjectStatus({
+              text: { path: "sapDocNumber", formatter: function(d){ return d || "—"; } },
+              state: { path: "sapDocNumber", formatter: function(d){ return d ? "Success" : "None"; } },
+              icon: { path: "sapDocNumber", formatter: function(d){ return d ? "sap-icon://document" : ""; } }
             }),
             new sap.m.Text({ text: "{proposedAction}", wrapping: false }),
             new sap.m.Text({ text: { path: "requestedAt", formatter: function(d){ return d ? new Date(d).toLocaleDateString() : "—"; } } }),
