@@ -115,14 +115,18 @@ sap.ui.getCore().attachInit(function () {
     var base   = oModel.getProperty('/s4WebGuiUrl');
     var client = oModel.getProperty('/s4Client');
     if (!base || !docNumber) return null;
-    var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
-    // MIGO does not accept pre-filled parameters via Web GUI URL (Enjoy transaction, ABAP OO).
-    // S/4HANA recommended: Fiori Launchpad semantic object GoodsMovement-displayDocument.
-    // Fiori App F1666 "Display Goods Movements" must be assigned to the user's launchpad role.
-    return base + '/sap/bc/ui2/flp?sap-client=' + encodeURIComponent(client) +
-           '#GoodsMovement-displayDocument' +
-           '?MaterialDocument=' + encodeURIComponent(docNumber) +
-           '&FiscalYear='       + year;
+    // Returns null — handled imperatively in the press handler (copy + open MIGO).
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MIGO&sap-client=' + encodeURIComponent(client);
+  }
+
+  function openDocInS4(docNumber, approvedAt) {
+    var url = s4DocUrl(docNumber, approvedAt);
+    if (!url) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(docNumber).catch(function(){});
+    }
+    window.open(url, '_blank');
+    sap.m.MessageToast.show('MIGO opened. Document ' + docNumber + ' copied to clipboard — paste into the Material Document field.', { duration: 5000 });
   }
 
   // ─── helpers ─────────────────────────────────────────────────────────────
@@ -1030,11 +1034,10 @@ sap.ui.getCore().attachInit(function () {
               enabled: { path: "sapDocNumber", formatter: function(d){ return !!d && !!oModel.getProperty('/s4WebGuiUrl'); } },
               press: function(e) {
                 var ctx = e.getSource().getBindingContext();
-                var url = s4DocUrl(
+                openDocInS4(
                   ctx && ctx.getProperty("sapDocNumber"),
                   ctx && ctx.getProperty("approvedAt")
                 );
-                if (url) window.open(url, "_blank");
               }
             }),
             new sap.m.ExpandableText({ text: "{proposedAction}", maxCharacters: 120 }),
