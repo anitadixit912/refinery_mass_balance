@@ -1076,23 +1076,21 @@ sap.ui.getCore().attachInit(function () {
     var oTolerance = new sap.m.Table({
       headerText: "Tolerance Configuration",
       columns: [
-        new sap.m.Column({ header: new sap.m.Label({ text: "Name" }) }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Level" }) }),
         new sap.m.Column({ header: new sap.m.Label({ text: "Material Group" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "INFO %" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "ADVISORY %" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "WARNING %" }) }),
-        new sap.m.Column({ header: new sap.m.Label({ text: "CRITICAL %" }) })
+        new sap.m.Column({ header: new sap.m.Label({ text: "Daily %" }),    hAlign: sap.ui.core.TextAlign.End }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Monthly %" }),  hAlign: sap.ui.core.TextAlign.End }),
+        new sap.m.Column({ header: new sap.m.Label({ text: "Escalation" }), minScreenWidth: sap.m.ScreenSize.Tablet, demandPopin: true })
       ],
       items: {
         path: "/tolerances",
         template: new sap.m.ColumnListItem({
           cells: [
-            new sap.m.Text({ text: "{configName}" }),
+            new sap.m.ObjectStatus({ text: "{level}", state: { path: "level", formatter: function(l){ return l === "REFINERY" ? "Error" : l === "PLANT" ? "Warning" : "None"; } } }),
             new sap.m.Text({ text: "{materialGroup}" }),
-            new sap.m.ObjectStatus({ text: { path: "infoThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Information" }),
-            new sap.m.ObjectStatus({ text: { path: "advisoryThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Warning" }),
-            new sap.m.ObjectStatus({ text: { path: "warningThresholdPct", formatter: function(v){ return v ? "≤ " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Warning" }),
-            new sap.m.ObjectStatus({ text: { path: "criticalThresholdPct", formatter: function(v){ return v ? "> " + (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, state: "Error" })
+            new sap.m.Text({ text: { path: "dailyTolerance",   formatter: function(v){ return v ? (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: { path: "monthlyTolerance", formatter: function(v){ return v ? (parseFloat(v)*100).toFixed(2) + "%" : "—"; } }, textAlign: sap.ui.core.TextAlign.End }),
+            new sap.m.Text({ text: "{escalationAction}" })
           ]
         })
       }
