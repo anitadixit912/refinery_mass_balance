@@ -60,7 +60,7 @@ class S4Client {
 
     // ── MASTER DATA — Plants (derived from movement doc plant field) ──
     async getPlants() {
-        // Use A_MaterialDocumentItem which the MM user is authorized for
+        // Step 1: unique plant codes from movement docs (always authorized for MM user)
         const res = await executeHttpRequest(
             { destinationName: DEST },
             {
@@ -70,13 +70,46 @@ class S4Client {
             }
         );
         const codes = [...new Set((res.data?.d?.results || []).map(r => (r.Plant || '').trim()).filter(Boolean))];
-        return codes.map(c => ({ plantCode: c, plantName: c, country: '', region: '' }));
+        const plants = codes.map(c => ({ plantCode: c, plantName: c, country: '', region: '' }));
+
+        if (!plants.length) return plants;
+
+        // Step 2: enrich with plant descriptions from API_PRODUCT_SRV plant entity (if activated)
+        // API_PRODUCT_SRV exposes A_ProductPlant which links materials to plants with
+        // country-of-origin data; for actual plant descriptions we try the purchasing org entity.
+        try {
+            const pRes = await executeHttpRequest(
+                { destinationName: DEST },
+                {
+                    method: 'GET',
+                    url: `/sap/opu/odata/sap/API_PRODUCT_SRV/A_ProductPlant?` +
+                        _qs({
+                            '$select': 'Plant,CountryOfOrigin',
+                            '$format': 'json',
+                            '$top'   : '500',
+                        }),
+                }
+            );
+            const plantMeta = {};
+            for (const r of (pRes.data?.d?.results || [])) {
+                if (r.Plant && !plantMeta[r.Plant]) {
+                    plantMeta[r.Plant] = { country: r.CountryOfOrigin || '' };
+                }
+            }
+            return plants.map(p => ({
+                ...p,
+                country: plantMeta[p.plantCode]?.country || '',
+            }));
+        } catch (err) {
+            console.warn(`[S4Client] API_PRODUCT_SRV/A_ProductPlant unavailable (${err.message}) — plant names remain as codes`);
+            return plants;
+        }
     }
 
-    // ── MASTER DATA — Materials (derived from movement docs) ──────────
+    // ── MASTER DATA — Materials (derived from movement docs + product master) ──
     async getMaterials() {
-        // Use A_MaterialDocumentItem (same API as plants — MM user authorized)
-        const res = await executeHttpRequest(
+        // Step 1: unique material codes + base UOM from movement docs (always authorized)
+        const movRes = await executeHttpRequest(
             { destinationName: DEST },
             {
                 method: 'GET',
@@ -85,7 +118,7 @@ class S4Client {
             }
         );
         const seen = new Set();
-        return (res.data?.d?.results || [])
+        const baseMats = (movRes.data?.d?.results || [])
             .filter(r => r.Material && !seen.has(r.Material) && seen.add(r.Material))
             .map(r => ({
                 materialCode: (r.Material || '').trim(),
@@ -93,6 +126,65 @@ class S4Client {
                 baseUom     : r.EntryUnit || 'MT',
                 productGroup: 'GP',
             }));
+
+        if (!baseMats.length) return baseMats;
+
+        // Step 2: enrich with English descriptions from API_PRODUCT_SRV (if activated)
+        const descMap = {};
+        try {
+            const descRes = await executeHttpRequest(
+                { destinationName: DEST },
+                {
+                    method: 'GET',
+                    url: `/sap/opu/odata/sap/API_PRODUCT_SRV/A_ProductDescription?` +
+                        _qs({
+                            '$filter': _fEncode(`Language eq 'EN'`),
+                            '$select': 'Material,MaterialDescription',
+                            '$format': 'json',
+                            '$top'   : '2000',
+                        }),
+                }
+            );
+            for (const d of (descRes.data?.d?.results || [])) {
+                if (d.Material) descMap[(d.Material || '').trim()] = d.MaterialDescription || '';
+            }
+            console.log(`[S4Client] Fetched ${Object.keys(descMap).length} material descriptions from API_PRODUCT_SRV`);
+        } catch (err) {
+            console.warn(`[S4Client] API_PRODUCT_SRV/A_ProductDescription unavailable (${err.message}) — using material codes as descriptions`);
+        }
+
+        // Step 3: enrich with material type / product group from A_Product (if activated)
+        const prodMap = {};
+        try {
+            const prodRes = await executeHttpRequest(
+                { destinationName: DEST },
+                {
+                    method: 'GET',
+                    url: `/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product?` +
+                        _qs({
+                            '$select': 'Material,MaterialType,BaseUnit',
+                            '$format': 'json',
+                            '$top'   : '2000',
+                        }),
+                }
+            );
+            for (const p of (prodRes.data?.d?.results || [])) {
+                if (p.Material) prodMap[(p.Material || '').trim()] = {
+                    materialType: p.MaterialType || '',
+                    baseUom     : p.BaseUnit || '',
+                };
+            }
+            console.log(`[S4Client] Fetched ${Object.keys(prodMap).length} material records from API_PRODUCT_SRV/A_Product`);
+        } catch (err) {
+            console.warn(`[S4Client] API_PRODUCT_SRV/A_Product unavailable (${err.message}) — using defaults`);
+        }
+
+        return baseMats.map(m => ({
+            materialCode: m.materialCode,
+            materialDesc: descMap[m.materialCode] || m.materialCode,
+            baseUom     : prodMap[m.materialCode]?.baseUom || m.baseUom,
+            productGroup: prodMap[m.materialCode]?.materialType || 'GP',
+        }));
     }
 
     // ── MASTER DATA — Storage Locations (from stock table per plant) ──
