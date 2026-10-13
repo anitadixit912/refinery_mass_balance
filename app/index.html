@@ -111,6 +111,17 @@ sap.ui.getCore().attachInit(function () {
            '&sap-client=' + encodeURIComponent(client);
   }
 
+  function s4DocUrl(docNumber, approvedAt) {
+    var base   = oModel.getProperty('/s4WebGuiUrl');
+    var client = oModel.getProperty('/s4Client');
+    if (!base || !docNumber) return null;
+    var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MB03' +
+           '&RM07M-MBLNR=' + encodeURIComponent(docNumber) +
+           '&RM07M-MJAHR=' + year +
+           '&sap-client='  + encodeURIComponent(client);
+  }
+
   // ─── helpers ─────────────────────────────────────────────────────────────
   function odata(path) {
     return fetch(path, {
@@ -1011,10 +1022,17 @@ sap.ui.getCore().attachInit(function () {
                 formatter: function(s){ return {APPROVED:"Success",REJECTED:"Error",PENDING:"Warning"}[s] || "None"; }
               }
             }),
-            new sap.m.ObjectStatus({
+            new sap.m.Link({
               text: { path: "sapDocNumber", formatter: function(d){ return d || "—"; } },
-              state: { path: "sapDocNumber", formatter: function(d){ return d ? "Success" : "None"; } },
-              icon: { path: "sapDocNumber", formatter: function(d){ return d ? "sap-icon://document" : ""; } }
+              enabled: { path: "sapDocNumber", formatter: function(d){ return !!d && !!oModel.getProperty('/s4WebGuiUrl'); } },
+              press: function(e) {
+                var ctx = e.getSource().getBindingContext();
+                var url = s4DocUrl(
+                  ctx && ctx.getProperty("sapDocNumber"),
+                  ctx && ctx.getProperty("approvedAt")
+                );
+                if (url) window.open(url, "_blank");
+              }
             }),
             new sap.m.ExpandableText({ text: "{proposedAction}", maxCharacters: 120 }),
             new sap.m.Text({ text: { path: "requestedAt", formatter: function(d){ return d ? new Date(d).toLocaleDateString() : "—"; } } }),
