@@ -370,6 +370,74 @@ class S4Client {
         }
         return items;
     }
+
+    // ─── WRITE: fetch CSRF token required by all SAP OData POST requests ──────
+    async _fetchCsrfToken() {
+        const res = await executeHttpRequest(
+            { destinationName: DEST },
+            {
+                method : 'GET',
+                url    : '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/',
+                headers: { 'X-CSRF-Token': 'Fetch', Accept: 'application/json' },
+            }
+        );
+        const token = res.headers?.['x-csrf-token'] || res.headers?.['X-CSRF-Token'] || '';
+        if (!token) throw new Error('SAP did not return a CSRF token — check destination authorisation');
+        return token;
+    }
+
+    // ─── WRITE: post a goods movement to API_MATERIAL_DOCUMENT_SRV ───────────
+    // movementType: '551' = shrinkage (shortage), '552' = gain (excess)
+    async postMaterialDocument({ material, plant, storageLocation, movementType, quantity, uom, postingDate }) {
+        const dateStr  = postingDate || new Date().toISOString().slice(0, 10);
+        const dateMs   = new Date(dateStr).getTime();
+        const odataDate = `/Date(${dateMs})/`;
+
+        const csrfToken = await this._fetchCsrfToken();
+
+        const body = {
+            PostingDate      : odataDate,
+            DocumentDate     : odataDate,
+            GoodsMovementCode: '05',      // goods movement without reference document
+            to_MaterialDocumentItem: {
+                results: [{
+                    Material         : String(material).padStart(18, ' ').trimStart(),
+                    Plant            : String(plant),
+                    StorageLocation  : String(storageLocation || '').padEnd(4, ' ').trimEnd() || undefined,
+                    GoodsMovementType: String(movementType),
+                    Quantity         : String(Math.abs(quantity).toFixed(3)),
+                    QuantityUnit     : String(uom || 'MT'),
+                }],
+            },
+        };
+
+        console.log(`[S4Client] postMaterialDocument → mvt=${movementType} mat=${material} plant=${plant} sloc=${storageLocation} qty=${quantity} ${uom}`);
+
+        const res = await executeHttpRequest(
+            { destinationName: DEST },
+            {
+                method : 'POST',
+                url    : '/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader',
+                data   : body,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept        : 'application/json',
+                    'X-CSRF-Token': csrfToken,
+                },
+            }
+        );
+
+        const d = res.data?.d;
+        if (!d?.MaterialDocument) {
+            throw new Error('SAP response missing MaterialDocument — body: ' + JSON.stringify(res.data));
+        }
+
+        console.log(`[S4Client] postMaterialDocument ← MaterialDocument=${d.MaterialDocument} Year=${d.MaterialDocumentYear}`);
+        return {
+            MaterialDocument    : d.MaterialDocument,
+            MaterialDocumentYear: d.MaterialDocumentYear,
+        };
+    }
 }
 
 module.exports = new S4Client();

@@ -433,6 +433,7 @@ entity ApprovalRequest : cuid, managed {
 
     // SAP document created after approval
     sapDocNumber    : String(10);
+    sapDocYear      : Integer;
     sapDocType      : String(5);
 }
 

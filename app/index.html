@@ -111,11 +111,11 @@ sap.ui.getCore().attachInit(function () {
            '&sap-client=' + encodeURIComponent(client);
   }
 
-  function s4DocUrl(docNumber, approvedAt) {
+  function s4DocUrl(docNumber, docYear) {
     var base   = oModel.getProperty('/s4WebGuiUrl');
     var client = oModel.getProperty('/s4Client') || '650';
     if (!base || !docNumber) return null;
-    var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
+    var year = docYear || new Date().getFullYear();
     // MB03: Display Material Document — CALL TRANSACTION * skips the initial screen
     // and navigates directly to the document. RM07M-MBLNR / RM07M-MJAHR are the
     // selection-screen field names; fields separated by ; per ITS WebGUI convention.
@@ -124,8 +124,8 @@ sap.ui.getCore().attachInit(function () {
            '&sap-client=' + encodeURIComponent(client);
   }
 
-  function openDocInS4(docNumber, approvedAt) {
-    var url = s4DocUrl(docNumber, approvedAt);
+  function openDocInS4(docNumber, docYear) {
+    var url = s4DocUrl(docNumber, docYear);
     if (!url) return;
     window.open(url, '_blank');
   }
@@ -1091,7 +1091,7 @@ sap.ui.getCore().attachInit(function () {
                 var ctx = e.getSource().getBindingContext();
                 openDocInS4(
                   ctx && ctx.getProperty("sapDocNumber"),
-                  ctx && ctx.getProperty("approvedAt")
+                  ctx && ctx.getProperty("sapDocYear")
                 );
               }
             }),

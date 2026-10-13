@@ -400,15 +400,58 @@ module.exports = cds.service.impl(async function (srv) {
         if (approval.approvalStatus !== 'PENDING')
             return req.error(409, 'Approval request is no longer pending');
 
-        // Generate a simulated SAP document number (real integration would call SAP APIs)
-        const sapDocNumber = `5000${Math.floor(Math.random() * 90000 + 10000)}`;
+        // ── 1. Resolve movement data from Exception → MassBalanceLine ──
+        let sapDocNumber, sapDocYear;
+        try {
+            const s4 = require('./agents/s4-client');
 
+            const exc = approval.exception_ID
+                ? await SELECT.one.from('refinery.massbalance.Exception')
+                      .where({ ID: approval.exception_ID })
+                : null;
+
+            const line = exc?.balanceLine_ID
+                ? await SELECT.one
+                      .from(MassBalanceLine)
+                      .where({ ID: exc.balanceLine_ID })
+                      .columns('variance', 'material_materialCode', 'material_baseUom',
+                               'plant_plantCode', 'tank_storageLocation')
+                : null;
+
+            // Movement type: 551 = shrinkage (shortage), 552 = gain (excess)
+            const MT_SHORTAGE = process.env.S4H_MT_SHORTAGE || '551';
+            const MT_EXCESS   = process.env.S4H_MT_EXCESS   || '552';
+            const movementType = (exc?.varianceSign === 'EXCESS') ? MT_EXCESS : MT_SHORTAGE;
+
+            const quantity = Math.abs(exc?.varianceMT ?? line?.variance ?? 0);
+            const uom      = line?.material_baseUom || 'MT';
+
+            // ── 2. Post real goods movement to SAP ──
+            const result = await s4.postMaterialDocument({
+                material       : line?.material_materialCode,
+                plant          : line?.plant_plantCode,
+                storageLocation: line?.tank_storageLocation,
+                movementType,
+                quantity,
+                uom,
+            });
+
+            sapDocNumber = result.MaterialDocument;
+            sapDocYear   = result.MaterialDocumentYear ? Number(result.MaterialDocumentYear)
+                                                       : new Date().getFullYear();
+        } catch (err) {
+            console.error('[approve] SAP posting failed:', err.message);
+            return req.error(500, `SAP posting failed: ${err.message}`);
+        }
+
+        // ── 3. Persist approval + SAP doc reference ──
         await UPDATE(ApprovalRequest).where({ ID: approvalId }).set({
             approvalStatus: 'APPROVED',
             approvedBy    : req.user?.id || 'APPROVER',
             approvedAt    : new Date().toISOString(),
             comments,
             sapDocNumber,
+            sapDocYear,
         });
 
         // Update parent exception status
@@ -420,12 +463,12 @@ module.exports = cds.service.impl(async function (srv) {
         }
 
         await _auditLog(cds.db, approval.run_ID, null, 'HUMAN',
-            'APPROVAL_GATE', `Correction approved by ${req.user?.id} — SAP doc ${sapDocNumber}`,
+            'APPROVAL_GATE', `Correction approved by ${req.user?.id} — SAP doc ${sapDocNumber} (${sapDocYear})`,
             req.user?.id || 'APPROVER', 'SUCCESS',
-            `approvalId=${approvalId}, sapDoc=${sapDocNumber}`);
+            `approvalId=${approvalId}, sapDoc=${sapDocNumber}, sapDocYear=${sapDocYear}`);
 
         return { ID: approvalId, approvalStatus: 'APPROVED',
-            sapDocNumber, message: `Correction approved. SAP document ${sapDocNumber} created.` };
+            sapDocNumber, message: `Correction approved. SAP document ${sapDocNumber} posted.` };
     });
 
     // ─────────────────────────────────────────────────────────────────
