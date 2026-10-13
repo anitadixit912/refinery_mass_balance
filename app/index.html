@@ -116,12 +116,12 @@ sap.ui.getCore().attachInit(function () {
     var client = oModel.getProperty('/s4Client') || '650';
     if (!base || !docNumber) return null;
     var year = approvedAt ? new Date(approvedAt).getFullYear() : new Date().getFullYear();
-    // MB03: Display Material Document — traditional Dynpro, supports URL parameter pre-fill.
-    // RM07M-MBLNR = document number, RM07M-MJAHR = fiscal year (initial screen fields).
-    return base + '/sap/bc/gui/sap/its/webgui?~transaction=MB03' +
-           '&RM07M-MBLNR=' + encodeURIComponent(docNumber) +
-           '&RM07M-MJAHR=' + encodeURIComponent(year) +
-           '&sap-client='  + encodeURIComponent(client);
+    // MB03: Display Material Document — CALL TRANSACTION * skips the initial screen
+    // and navigates directly to the document. RM07M-MBLNR / RM07M-MJAHR are the
+    // selection-screen field names; fields separated by ; per ITS WebGUI convention.
+    var txParam = '*MB03 RM07M-MBLNR=' + docNumber + ';RM07M-MJAHR=' + year;
+    return base + '/sap/bc/gui/sap/its/webgui?~transaction=' + encodeURIComponent(txParam) +
+           '&sap-client=' + encodeURIComponent(client);
   }
 
   function openDocInS4(docNumber, approvedAt) {
