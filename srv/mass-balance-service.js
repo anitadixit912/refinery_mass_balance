@@ -43,6 +43,13 @@ module.exports = cds.service.impl(async function (srv) {
     // ─────────────────────────────────────────────────────────────────
     srv.on('triggerRun', async (req) => {
         const { periodType, period, plantId, triggerType } = req.data;
+
+        // Validate period format (YYYY-MM or YYYY-MM-DD only)
+        if (!/^\d{4}-\d{2}(-\d{2})?$/.test(period || ''))
+            return req.error(400, `Invalid period "${period}". Expected YYYY-MM or YYYY-MM-DD.`);
+        if (!['DAILY', 'MONTHLY'].includes(periodType))
+            return req.error(400, `Invalid periodType "${periodType}". Expected DAILY or MONTHLY.`);
+
         const runId = `RUN-${period}-${uuidv4().split('-')[0].toUpperCase()}`;
 
         const run = await INSERT.into(MassBalanceRun).entries({
@@ -284,6 +291,11 @@ module.exports = cds.service.impl(async function (srv) {
     srv.on('runFullPipeline', async (req) => {
         const { periodType, period, plantId } = req.data;
 
+        if (!/^\d{4}-\d{2}(-\d{2})?$/.test(period || ''))
+            return req.error(400, `Invalid period "${period}". Expected YYYY-MM or YYYY-MM-DD.`);
+        if (!['DAILY', 'MONTHLY'].includes(periodType))
+            return req.error(400, `Invalid periodType "${periodType}". Expected DAILY or MONTHLY.`);
+
         // Delegate the full pipeline to the orchestrator agent
         const result = await orchestrator.runFullPipeline({
             periodType, period, plantId,
@@ -297,7 +309,12 @@ module.exports = cds.service.impl(async function (srv) {
     //  ACTION: classifyRootCause  (on Exception)
     // ─────────────────────────────────────────────────────────────────
     srv.on('classifyRootCause', async (req) => {
-        const { exceptionId, rootCauseCategory, narrative } = req.data;
+        const { exceptionId, rootCauseCategory } = req.data;
+        const narrative = (req.data.narrative || '').slice(0, 2000);
+
+        const VALID_CATEGORIES = ['MC', 'TX', 'MD', 'TF', 'PL', 'SY'];
+        if (rootCauseCategory && !VALID_CATEGORIES.includes(rootCauseCategory))
+            return req.error(400, `Invalid rootCauseCategory "${rootCauseCategory}". Expected one of: ${VALID_CATEGORIES.join(', ')}`);
 
         const exc = await SELECT.one.from('refinery.massbalance.Exception')
             .where({ ID: exceptionId });
@@ -319,7 +336,12 @@ module.exports = cds.service.impl(async function (srv) {
     //  evidence before any exception is raised or escalated (slide 6)
     // ─────────────────────────────────────────────────────────────────
     srv.on('submitForApproval', async (req) => {
-        const { exceptionId, proposedAction, priority } = req.data;
+        const { exceptionId, priority } = req.data;
+        const proposedAction = (req.data.proposedAction || '').slice(0, 2000);
+
+        const VALID_PRIORITIES = ['URGENT', 'HIGH', 'MEDIUM', 'LOW'];
+        if (priority && !VALID_PRIORITIES.includes(priority))
+            return req.error(400, `Invalid priority "${priority}". Expected one of: ${VALID_PRIORITIES.join(', ')}`);
 
         const exc = await SELECT.one.from('refinery.massbalance.Exception')
             .where({ ID: exceptionId });
@@ -350,7 +372,8 @@ module.exports = cds.service.impl(async function (srv) {
     //  ACTION: closeException
     // ─────────────────────────────────────────────────────────────────
     srv.on('closeException', async (req) => {
-        const { exceptionId, comments } = req.data;
+        const { exceptionId } = req.data;
+        const comments = (req.data.comments || '').slice(0, 2000);
 
         await UPDATE('refinery.massbalance.Exception').where({ ID: exceptionId }).set({
             status         : 'CLOSED',
@@ -368,7 +391,8 @@ module.exports = cds.service.impl(async function (srv) {
     //  before any SAP document is created or modified (slide 23)
     // ─────────────────────────────────────────────────────────────────
     srv.on('approve', async (req) => {
-        const { approvalId, comments } = req.data;
+        const { approvalId } = req.data;
+        const comments = (req.data.comments || '').slice(0, 2000);
 
         const approval = await SELECT.one.from(ApprovalRequest).where({ ID: approvalId });
         if (!approval) return req.error(404, `Approval ${approvalId} not found`);
@@ -407,7 +431,8 @@ module.exports = cds.service.impl(async function (srv) {
     //  ACTION: reject  (on ApprovalRequest)
     // ─────────────────────────────────────────────────────────────────
     srv.on('rejectApproval', async (req) => {
-        const { approvalId, comments } = req.data;
+        const { approvalId } = req.data;
+        const comments = (req.data.comments || '').slice(0, 2000);
 
         const approval = await SELECT.one.from(ApprovalRequest).where({ ID: approvalId });
         if (!approval) return req.error(404, `Approval ${approvalId} not found`);

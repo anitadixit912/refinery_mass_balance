@@ -186,7 +186,11 @@ class LLMClient {
         });
 
         const data = await response.json();
-        if (!data.access_token) throw new Error('AI Core token fetch failed: ' + JSON.stringify(data));
+        if (!data.access_token) {
+            // Log only the error code/description — never the full response (may echo credentials)
+            const errCode = data.error || data.error_description || `HTTP ${response.status}`;
+            throw new Error(`AI Core token fetch failed: ${errCode}`);
+        }
 
         this._tokenCache  = data.access_token;
         this._tokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
